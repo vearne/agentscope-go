@@ -1,5 +1,7 @@
 # agentscope-go
 
+[English](./README.md)
+
 一个用于构建多 Agent LLM 应用的 Go 框架，采用模块化、可组合的架构设计。
 
 受 [AgentScope](https://github.com/modelscope/agentscope) 启发，agentscope-go 将地道的 Go 设计带入多 Agent 编排领域——原生支持 ReAct Agent、工具调用、多模型提供商、流水线、A2A 协议和 OpenTelemetry 链路追踪。

@@ -1,5 +1,7 @@
 # agentscope-go
 
+[中文文档](./README_zh.md)
+
 A Go framework for building multi-agent LLM applications with a modular, composable architecture.
 
 Inspired by [AgentScope](https://github.com/modelscope/agentscope), agentscope-go brings idiomatic Go design to multi-agent orchestration — with first-class support for ReAct agents, tool use, multi-model providers, pipelines, A2A protocol, and OpenTelemetry tracing.
