@@ -321,6 +321,111 @@ func TestParseFrontMatter(t *testing.T) {
 	}
 }
 
+func TestRegisterAgentSkillWithTools(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "weather_skill")
+	writeSkillMD(t, dir, `---
+name: Weather Query
+description: Query weather for any city.
+---
+
+# Weather Query
+Use the shell to run `+"`curl wttr.in/{city}`"+` for weather info.
+`)
+
+	tk := NewToolkit()
+
+	if tk.HasTool("view_text_file") {
+		t.Fatal("view_text_file should not exist before registration")
+	}
+
+	if err := tk.RegisterAgentSkillWithTools(dir); err != nil {
+		t.Fatalf("RegisterAgentSkillWithTools failed: %v", err)
+	}
+
+	skills := tk.GetAgentSkills()
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Name != "Weather Query" {
+		t.Errorf("skill name = %q, want %q", skills[0].Name, "Weather Query")
+	}
+
+	if !tk.HasTool("view_text_file") {
+		t.Error("view_text_file tool should be registered")
+	}
+}
+
+func TestRegisterAgentSkillWithTools_IdempotentTool(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "skill_a")
+	writeSkillMD(t, dir, `---
+name: Skill A
+description: First skill.
+---
+
+Content A.
+`)
+
+	tk := NewToolkit()
+
+	if err := RegisterViewTextFileTool(tk); err != nil {
+		t.Fatalf("manual RegisterViewTextFileTool failed: %v", err)
+	}
+
+	if err := tk.RegisterAgentSkillWithTools(dir); err != nil {
+		t.Fatalf("RegisterAgentSkillWithTools should not fail when tool already exists: %v", err)
+	}
+
+	if !tk.HasTool("view_text_file") {
+		t.Error("view_text_file should still be registered")
+	}
+}
+
+func TestRegisterAgentSkillWithTools_BadDir(t *testing.T) {
+	tk := NewToolkit()
+	err := tk.RegisterAgentSkillWithTools("./nonexistent_dir")
+	if err == nil {
+		t.Fatal("expected error for bad skill dir")
+	}
+	if tk.HasTool("view_text_file") {
+		t.Error("view_text_file should not be registered when skill registration fails")
+	}
+}
+
+func TestRegisterAgentSkillWithTools_Multiple(t *testing.T) {
+	base := t.TempDir()
+
+	dir1 := filepath.Join(base, "skill_a")
+	writeSkillMD(t, dir1, `---
+name: Skill A
+description: First.
+---
+
+A content.
+`)
+
+	dir2 := filepath.Join(base, "skill_b")
+	writeSkillMD(t, dir2, `---
+name: Skill B
+description: Second.
+---
+
+B content.
+`)
+
+	tk := NewToolkit()
+	tk.RegisterAgentSkillWithTools(dir1)
+	tk.RegisterAgentSkillWithTools(dir2)
+
+	skills := tk.GetAgentSkills()
+	if len(skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(skills))
+	}
+
+	if !tk.HasTool("view_text_file") {
+		t.Error("view_text_file should be registered (only once)")
+	}
+}
+
 func TestRegisterAgentSkill_DuplicateOverwrites(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "skill")
 	writeSkillMD(t, dir, `---

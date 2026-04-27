@@ -65,6 +65,14 @@ func main() {
 		fmt.Println("  (prompt is empty after removing all skills)")
 	}
 
+	fmt.Println("\n=== RegisterAgentSkillWithTools ===")
+	tk2 := tool.NewToolkit()
+	if err := tk2.RegisterAgentSkillWithTools(skillDir("weather_skill")); err != nil {
+		log.Fatalf("RegisterAgentSkillWithTools: %v", err)
+	}
+	fmt.Printf("  Skills: %d, Has view_text_file: %v\n",
+		len(tk2.GetAgentSkills()), tk2.HasTool("view_text_file"))
+
 	fmt.Println("\n=== Error Handling ===")
 	err := tk.RegisterAgentSkill("./nonexistent_dir")
 	fmt.Printf("  Missing dir: %v\n", err)

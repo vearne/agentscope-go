@@ -67,6 +67,22 @@ func (t *Toolkit) RegisterAgentSkill(skillDir string) error {
 	return nil
 }
 
+// RegisterAgentSkillWithTools registers an agent skill and ensures that the
+// view_text_file tool is available so the LLM can read SKILL.md on demand.
+// This is a convenience wrapper around RegisterAgentSkill that automatically
+// registers the file-viewing tool (idempotent — skips if already registered).
+func (t *Toolkit) RegisterAgentSkillWithTools(skillDir string) error {
+	if err := t.RegisterAgentSkill(skillDir); err != nil {
+		return err
+	}
+	if !t.HasTool("view_text_file") {
+		if err := RegisterViewTextFileTool(t); err != nil {
+			return fmt.Errorf("register view_text_file tool: %w", err)
+		}
+	}
+	return nil
+}
+
 func (t *Toolkit) RemoveAgentSkill(name string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
