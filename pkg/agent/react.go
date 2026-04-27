@@ -173,6 +173,10 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		return nil, fmt.Errorf("add assistant message: %w", err)
 	}
 
+	if sc := studio.GetClient(); sc != nil {
+		studio.ForwardMessage(ctx, a.name, "assistant", assistantMsg)
+	}
+
 	if chatResp.HasToolUse() {
 		toolUseBlocks := chatResp.GetToolUseBlocks()
 		var toolResultBlocks []message.ContentBlock
@@ -212,6 +216,10 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		}
 		if err := a.mem.Add(ctx, toolResultMsg); err != nil {
 			return nil, fmt.Errorf("add tool result: %w", err)
+		}
+
+		if sc := studio.GetClient(); sc != nil {
+			studio.ForwardMessage(ctx, "tool", "tool", toolResultMsg)
 		}
 
 		return assistantMsg, nil
