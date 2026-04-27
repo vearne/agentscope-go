@@ -7,6 +7,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
@@ -63,6 +64,64 @@ func SetupTracing(ctx context.Context, endpoint string, opts ...TracingOption) (
 	}
 
 	exporter, err := otlptracegrpc.New(ctx, exporterOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String(cfg.serviceName),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+
+	otel.SetTracerProvider(tp)
+	provider = tp
+
+	return func(ctx context.Context) error {
+		globalMu.Lock()
+		defer globalMu.Unlock()
+		if provider != nil {
+			err := provider.Shutdown(ctx)
+			provider = nil
+			return err
+		}
+		return nil
+	}, nil
+}
+
+// SetupTracingHTTP initializes the global TracerProvider with an OTLP HTTP exporter.
+// It returns a shutdown function that the caller should defer.
+func SetupTracingHTTP(ctx context.Context, endpoint string, opts ...TracingOption) (func(context.Context) error, error) {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	if provider != nil {
+		return func(context.Context) error { return nil }, nil
+	}
+
+	cfg := tracingConfig{
+		serviceName: defaultServiceName,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	exporterOpts := []otlptracehttp.Option{
+		otlptracehttp.WithEndpoint(endpoint),
+	}
+	if cfg.insecure {
+		exporterOpts = append(exporterOpts, otlptracehttp.WithInsecure())
+	}
+
+	exporter, err := otlptracehttp.New(ctx, exporterOpts...)
 	if err != nil {
 		return nil, err
 	}

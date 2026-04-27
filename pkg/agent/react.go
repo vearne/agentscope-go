@@ -11,6 +11,7 @@ import (
 	"github.com/vearne/agentscope-go/pkg/memory"
 	"github.com/vearne/agentscope-go/pkg/message"
 	"github.com/vearne/agentscope-go/pkg/model"
+	"github.com/vearne/agentscope-go/pkg/studio"
 	"github.com/vearne/agentscope-go/pkg/tool"
 )
 
@@ -77,6 +78,14 @@ func NewReActAgent(opts ...ReActOption) *ReActAgent {
 	}
 	if a.mem == nil {
 		a.mem = memory.NewInMemoryMemory()
+	}
+	if sc := studio.GetClient(); sc != nil {
+		a.hooks.preReply = append(a.hooks.preReply, func(ctx context.Context, ag AgentBase, msg *message.Msg, resp *message.Msg) {
+			studio.ForwardMessage(ctx, msg.Name, msg.Role, msg)
+		})
+		a.hooks.postReply = append(a.hooks.postReply, func(ctx context.Context, ag AgentBase, msg *message.Msg, resp *message.Msg) {
+			studio.ForwardMessage(ctx, ag.Name(), "assistant", resp)
+		})
 	}
 	return a
 }

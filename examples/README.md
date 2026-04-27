@@ -44,6 +44,7 @@ go run ./examples/hello
 | Example | Description |
 |---------|-------------|
 | [a2a_agent](./a2a_agent) | Agent-to-Agent (A2A) protocol: HTTP server/client, discovery, and bus registry |
+| [studio](./studio) | agentscope-studio integration: real-time visualization of agent conversations |
 | [tracing](./tracing) | OpenTelemetry tracing with custom spans and agent hooks |
 
 ## API Key Setup
@@ -97,4 +98,5 @@ export GEMINI_API_KEY="AIza..."
 
 ### Observability
 
+- **studio** — Connect to agentscope-studio for real-time visualization of agent conversations, tool usage, and tracing. A single `studio.Init()` call enables automatic message forwarding.
 - **tracing** — Set up OpenTelemetry tracing with an OTLP gRPC exporter. Create spans around agent operations and use hooks (`PreReply`/`PostReply`) for automatic instrumentation.
