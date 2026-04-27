@@ -14,13 +14,15 @@ type registeredTool struct {
 }
 
 type Toolkit struct {
-	tools map[string]*registeredTool
-	mu    sync.RWMutex
+	tools  map[string]*registeredTool
+	skills map[string]*AgentSkill
+	mu     sync.RWMutex
 }
 
 func NewToolkit() *Toolkit {
 	return &Toolkit{
-		tools: make(map[string]*registeredTool),
+		tools:  make(map[string]*registeredTool),
+		skills: make(map[string]*AgentSkill),
 	}
 }
 
