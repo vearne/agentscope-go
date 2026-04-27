@@ -27,6 +27,7 @@ go run ./examples/hello
 | Example | Description |
 |---------|-------------|
 | [tool_usage](./tool_usage) | Tool registration: manual, reflection-based (`RegisterFunc`), and built-in tools |
+| [agent_skill](./agent_skill) | Agent skills: register SKILL.md directories, generate skill prompts, custom templates |
 | [session_persistence](./session_persistence) | Save and restore agent memory using JSON file sessions |
 | [multi_model](./multi_model) | Using OpenAI, Anthropic, and Gemini model providers |
 
@@ -76,6 +77,11 @@ export GEMINI_API_KEY="AIza..."
   - Manual `Register()` with explicit parameter schema
   - Reflection-based `RegisterFunc()` with struct tags
   - Built-in tools (`RegisterShellTool`, `RegisterPrintTool`)
+- **agent_skill** — Demonstrates the agent skill system:
+  - Register skills from SKILL.md directories with YAML front matter
+  - Generate skill prompts for agent system prompts (`GetAgentSkillPrompt`)
+  - Remove skills and use custom templates
+  - No API key required (standalone demo)
 
 ### Persistence
 

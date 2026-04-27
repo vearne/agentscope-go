@@ -27,6 +27,7 @@ go run ./examples/hello
 | 示例 | 说明 |
 |------|------|
 | [tool_usage](./tool_usage) | 工具注册：手动注册、反射注册（`RegisterFunc`）和内置工具 |
+| [agent_skill](./agent_skill) | Agent 技能：注册 SKILL.md 目录、生成技能提示词、自定义模板 |
 | [session_persistence](./session_persistence) | 使用 JSON 文件会话保存和恢复 Agent 记忆 |
 | [multi_model](./multi_model) | 同时使用 OpenAI、Anthropic、Gemini 模型提供商 |
 
@@ -75,6 +76,11 @@ export GEMINI_API_KEY="AIza..."
   - 手动 `Register()` 配合显式参数 Schema
   - 基于 `RegisterFunc()` 反射注册，使用结构体标签
   - 内置工具（`RegisterShellTool`、`RegisterPrintTool`）
+- **agent_skill** — 演示 Agent 技能系统：
+  - 从 SKILL.md 目录注册技能（YAML Front Matter 格式）
+  - 生成技能提示词用于 Agent 系统提示词（`GetAgentSkillPrompt`）
+  - 移除技能、使用自定义模板
+  - 无需 API Key（独立运行）
 
 ### 会话持久化
 
