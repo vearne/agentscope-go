@@ -18,6 +18,7 @@ Inspired by [AgentScope](https://github.com/modelscope/agentscope), agentscope-g
 - **OpenTelemetry Tracing** — Built-in OTLP gRPC exporter with agent hooks for automatic instrumentation
 - **Multimodal Messages** — Text, thinking, tool use/result, image, audio, and video content blocks
 - **State Management** — Thread-safe key-value state module for sharing data across agents
+- **Agent Skills** — Load specialized instruction sets from `SKILL.md` directories with YAML front matter; generate skill prompts dynamically for agent system prompts
 
 ## Installation
 
@@ -164,6 +165,53 @@ tool.RegisterShellTool(tk)  // execute_shell
 tool.RegisterPrintTool(tk)  // print_text
 ```
 
+### Agent Skills
+
+Agent Skills allow you to load specialized instruction sets into a Toolkit from directory-based skill definitions. Each skill directory must contain a `SKILL.md` file with YAML front matter:
+
+```markdown
+---
+name: Weather Query
+description: Query current weather conditions for any city.
+---
+
+# Weather Query Skill
+
+Use the `execute_shell` tool to fetch weather data:
+
+1. Run `curl -s "wttr.in/{city}?format=3"` for a brief summary
+2. Run `curl -s "wttr.in/{city}"` for a detailed forecast
+```
+
+**Register and manage skills:**
+
+```go
+tk := tool.NewToolkit()
+
+// Register a skill from a directory containing SKILL.md
+tk.RegisterAgentSkill("./weather_skill")
+tk.RegisterAgentSkill("./code_review_skill")
+
+// List registered skills
+for _, s := range tk.GetAgentSkills() {
+    fmt.Printf("  - %s: %s\n", s.Name, s.Description)
+}
+
+// Generate a skill prompt for injection into agent system prompts
+prompt := tk.GetAgentSkillPrompt()
+
+// Use custom templates for the prompt
+customPrompt := tk.GetAgentSkillPromptWithTemplate(
+    "# Available Skills\nUse these skills to assist the user.",
+    "- **%s**: %s (see %s/SKILL.md)",
+)
+
+// Remove a skill by name
+tk.RemoveAgentSkill("Weather Query")
+```
+
+The generated prompt instructs the LLM about available skills and how to access their detailed instructions. You can inject the prompt into your agent's system prompt via `WithReActSystemPrompt()`.
+
 ### Pipelines
 
 **Sequential** — Agents run one after another, passing the output forward:
@@ -286,6 +334,7 @@ See the [examples directory](./examples/) for complete, runnable examples:
 | [react_agent](./examples/react_agent) | ReAct agent with tool usage (calculator, weather) |
 | [streaming](./examples/streaming) | Streaming model responses with SSE |
 | [tool_usage](./examples/tool_usage) | Tool registration methods: manual, reflection, built-in |
+| [agent_skill](./examples/agent_skill) | Agent skills: register SKILL.md directories, generate skill prompts, custom templates |
 | [session_persistence](./examples/session_persistence) | Save/restore agent memory via JSON session |
 | [multi_model](./examples/multi_model) | Using OpenAI, Anthropic, and Gemini providers |
 | [multi_agent](./examples/multi_agent) | Sequential pipeline and ChatRoom |

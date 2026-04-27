@@ -18,6 +18,7 @@
 - **OpenTelemetry 链路追踪** — 内置 OTLP gRPC 导出器，通过 Agent 钩子实现自动埋点
 - **多模态消息** — 支持文本、思考、工具调用/结果、图片、音频和视频等内容块
 - **状态管理** — 线程安全的键值状态模块，用于在 Agent 间共享数据
+- **Agent 技能（Skill）** — 从 `SKILL.md` 目录加载专用指令集（含 YAML 前置元数据），动态生成技能提示词注入 Agent 系统提示词
 
 ## 安装
 
@@ -164,6 +165,53 @@ tool.RegisterShellTool(tk)  // execute_shell
 tool.RegisterPrintTool(tk)  // print_text
 ```
 
+### Agent 技能（Skills）
+
+Agent 技能允许你从目录中加载专用指令集到 Toolkit。每个技能目录必须包含一个 `SKILL.md` 文件，文件使用 YAML 前置元数据格式：
+
+```markdown
+---
+name: Weather Query
+description: 查询任意城市的当前天气状况。
+---
+
+# Weather Query Skill
+
+使用 `execute_shell` 工具获取天气数据：
+
+1. 运行 `curl -s "wttr.in/{city}?format=3"` 获取简要摘要
+2. 运行 `curl -s "wttr.in/{city}"` 获取详细预报
+```
+
+**注册和管理技能：**
+
+```go
+tk := tool.NewToolkit()
+
+// 从包含 SKILL.md 的目录注册技能
+tk.RegisterAgentSkill("./weather_skill")
+tk.RegisterAgentSkill("./code_review_skill")
+
+// 列出已注册的技能
+for _, s := range tk.GetAgentSkills() {
+    fmt.Printf("  - %s: %s\n", s.Name, s.Description)
+}
+
+// 生成技能提示词，用于注入 Agent 系统提示词
+prompt := tk.GetAgentSkillPrompt()
+
+// 使用自定义模板生成提示词
+customPrompt := tk.GetAgentSkillPromptWithTemplate(
+    "# 可用技能\n使用这些技能来辅助用户。",
+    "- **%s**: %s（参见 %s/SKILL.md）",
+)
+
+// 按名称移除技能
+tk.RemoveAgentSkill("Weather Query")
+```
+
+生成的提示词会告知 LLM 可用的技能以及如何访问其详细指令。你可以通过 `WithReActSystemPrompt()` 将提示词注入到 Agent 的系统提示词中。
+
 ### 流水线
 
 **Sequential（顺序）** — Agent 依次执行，前一个的输出传递给下一个：
@@ -286,6 +334,7 @@ message.NewThinkingBlock("让我一步步思考...")
 | [react_agent](./examples/react_agent) | ReAct Agent 搭配工具使用（计算器、天气查询） |
 | [streaming](./examples/streaming) | 通过 SSE 流式输出模型响应 |
 | [tool_usage](./examples/tool_usage) | 工具注册方式：手动、反射、内置 |
+| [agent_skill](./examples/agent_skill) | Agent 技能：注册 SKILL.md 目录、生成技能提示词、自定义模板 |
 | [session_persistence](./examples/session_persistence) | 使用 JSON 会话保存/恢复 Agent 记忆 |
 | [multi_model](./examples/multi_model) | 同时使用 OpenAI、Anthropic、Gemini 模型提供商 |
 | [multi_agent](./examples/multi_agent) | 顺序流水线和 ChatRoom 多 Agent 对话 |
