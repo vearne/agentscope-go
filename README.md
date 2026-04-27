@@ -341,6 +341,7 @@ See the [examples directory](./examples/) for complete, runnable examples:
 | [fanout_pipeline](./examples/fanout_pipeline) | Parallel execution with FanoutPipeline |
 | [msghub](./examples/msghub) | MsgHub broadcast/gather with dynamic participants |
 | [debate](./examples/debate) | Multi-agent debate with judge |
+| [werewolves](./examples/werewolves) | Nine-player werewolves game with role-based gameplay |
 | [a2a_agent](./examples/a2a_agent) | A2A protocol: server, client, and bus |
 | [tracing](./examples/tracing) | OpenTelemetry tracing with agent hooks |
 

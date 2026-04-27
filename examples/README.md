@@ -39,6 +39,7 @@ go run ./examples/hello
 | [fanout_pipeline](./fanout_pipeline) | Parallel code review with FanoutPipeline (concurrent execution) |
 | [msghub](./msghub) | MsgHub for multi-agent broadcast and gather with dynamic participants |
 | [debate](./debate) | Multi-agent debate with proponent, opponent, and judge |
+| [werewolves](./werewolves) | Nine-player werewolves game with role-based gameplay (werewolf, seer, witch, hunter, villager) |
 
 ### Integration
 
@@ -97,6 +98,7 @@ export GEMINI_API_KEY="AIza..."
 - **fanout_pipeline** — Parallel execution: multiple agents process the same input concurrently.
 - **msghub** — MsgHub pattern: broadcast messages to all participants, gather responses, dynamically add/remove agents.
 - **debate** — A complete multi-agent workflow: two agents debate, a third judges.
+- **werewolves** — A nine-player werewolves (Mafia-style) game: 3 werewolves, 3 villagers, 1 seer, 1 witch, and 1 hunter. Demonstrates MsgHub broadcasting, sequential discussion, parallel voting, role-based prompts, and multi-phase game orchestration.
 
 ### A2A Protocol
 
