@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
+	"net/url"
 	"sync"
 	"time"
 
@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	globalMu     sync.Mutex
-	globalClient *StudioClient
+	globalMu              sync.Mutex
+	globalClient          *StudioClient
+	globalTracingShutdown func(context.Context) error
 )
 
 // Option configures the studio client.
@@ -82,9 +83,26 @@ func Init(opts ...Option) error {
 
 	globalClient = client
 
-	tracingEndpoint := strings.TrimRight(cfg.url, "/") + "/v1/traces"
-	if _, err := tracing.SetupTracingHTTP(context.Background(), tracingEndpoint, tracing.WithInsecure()); err != nil {
+	// OTLP HTTP exporter expects endpoint as host:port and URL path separately.
+	parsedURL, err := url.Parse(cfg.url)
+	if err != nil {
+		log.Printf("studio: invalid URL %q, tracing disabled: %v", cfg.url, err)
+		return nil
+	}
+	if parsedURL.Host == "" {
+		log.Printf("studio: invalid URL %q (missing host), tracing disabled", cfg.url)
+		return nil
+	}
+	shutdownTracing, err := tracing.SetupTracingHTTP(
+		context.Background(),
+		parsedURL.Host,
+		tracing.WithInsecure(),
+		tracing.WithHTTPURLPath("/v1/traces"),
+	)
+	if err != nil {
 		log.Printf("studio: failed to setup tracing: %v", err)
+	} else {
+		globalTracingShutdown = shutdownTracing
 	}
 
 	return nil
@@ -95,6 +113,12 @@ func Shutdown(ctx context.Context) error {
 	globalMu.Lock()
 	defer globalMu.Unlock()
 
+	if globalTracingShutdown != nil {
+		if err := globalTracingShutdown(ctx); err != nil {
+			return err
+		}
+		globalTracingShutdown = nil
+	}
 	globalClient = nil
 	return nil
 }

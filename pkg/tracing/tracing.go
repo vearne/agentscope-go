@@ -29,6 +29,7 @@ type TracingOption func(*tracingConfig)
 type tracingConfig struct {
 	serviceName string
 	insecure    bool
+	httpURLPath string
 }
 
 func WithServiceName(name string) TracingOption {
@@ -37,6 +38,10 @@ func WithServiceName(name string) TracingOption {
 
 func WithInsecure() TracingOption {
 	return func(c *tracingConfig) { c.insecure = true }
+}
+
+func WithHTTPURLPath(path string) TracingOption {
+	return func(c *tracingConfig) { c.httpURLPath = path }
 }
 
 // SetupTracing initializes the global TracerProvider with an OTLP gRPC exporter.
@@ -116,6 +121,9 @@ func SetupTracingHTTP(ctx context.Context, endpoint string, opts ...TracingOptio
 
 	exporterOpts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(endpoint),
+	}
+	if cfg.httpURLPath != "" {
+		exporterOpts = append(exporterOpts, otlptracehttp.WithURLPath(cfg.httpURLPath))
 	}
 	if cfg.insecure {
 		exporterOpts = append(exporterOpts, otlptracehttp.WithInsecure())

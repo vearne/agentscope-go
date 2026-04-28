@@ -13,6 +13,9 @@ import (
 	"github.com/vearne/agentscope-go/pkg/model"
 	"github.com/vearne/agentscope-go/pkg/studio"
 	"github.com/vearne/agentscope-go/pkg/tool"
+	"github.com/vearne/agentscope-go/pkg/tracing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 const defaultMaxIters = 10
@@ -98,12 +101,20 @@ func (a *ReActAgent) Memory() memory.MemoryBase {
 }
 
 func (a *ReActAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, error) {
+	ctx, span := tracing.StartSpan(ctx, "invoke_agent "+a.name, tracingAttributes(
+		attribute.String("gen_ai.operation.name", "invoke_agent"),
+		attribute.String("gen_ai.agent.name", a.name),
+	)...)
+	defer span.End()
+
 	for _, h := range a.hooks.preReply {
 		h(ctx, a, msg, nil)
 	}
 
 	if msg != nil {
 		if err := a.mem.Add(ctx, msg); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return nil, fmt.Errorf("add message to memory: %w", err)
 		}
 	}
@@ -121,6 +132,8 @@ func (a *ReActAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg,
 	for i := 0; i < a.maxIters; i++ {
 		resp, err = a.thinkAndAct(ctx)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
 		if !hasToolUse(resp) {
@@ -132,6 +145,7 @@ func (a *ReActAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg,
 		h(ctx, a, msg, resp)
 	}
 
+	span.SetStatus(codes.Ok, "")
 	return resp, nil
 }
 
@@ -143,11 +157,28 @@ func (a *ReActAgent) Observe(ctx context.Context, msg *message.Msg) error {
 }
 
 func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
+	ctx, span := tracing.StartSpan(ctx, "chat "+a.model.ModelName(), tracingAttributes(
+		attribute.String("gen_ai.operation.name", "chat"),
+		attribute.String("gen_ai.request.model", a.model.ModelName()),
+	)...)
+	defer span.End()
+
 	msgs := a.mem.GetMessages()
+	formatCtx, formatSpan := tracing.StartSpan(ctx, "format "+a.name, tracingAttributes(
+		attribute.String("gen_ai.operation.name", "format"),
+		attribute.String("gen_ai.agent.name", a.name),
+	)...)
 	formatted, err := a.fmt.Format(msgs)
 	if err != nil {
+		formatSpan.RecordError(err)
+		formatSpan.SetStatus(codes.Error, err.Error())
+		formatSpan.End()
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("format messages: %w", err)
 	}
+	formatSpan.SetStatus(codes.Ok, "")
+	formatSpan.End()
 
 	var opts []model.CallOption
 	if a.toolkit != nil && len(a.toolkit.GetSchemas()) > 0 {
@@ -157,9 +188,17 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		})
 	}
 
-	chatResp, err := a.model.Call(ctx, formatted, opts...)
+	chatResp, err := a.model.Call(formatCtx, formatted, opts...)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("model call: %w", err)
+	}
+	if chatResp != nil && chatResp.Usage != nil {
+		span.SetAttributes(
+			attribute.Int("gen_ai.usage.input_tokens", chatResp.Usage.InputTokens),
+			attribute.Int("gen_ai.usage.output_tokens", chatResp.Usage.OutputTokens),
+		)
 	}
 
 	assistantMsg := &message.Msg{
@@ -194,13 +233,22 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				continue
 			}
 
+			_, toolSpan := tracing.StartSpan(ctx, "execute_tool "+toolName, tracingAttributes(
+				attribute.String("gen_ai.operation.name", "execute_tool"),
+				attribute.String("gen_ai.tool.name", toolName),
+			)...)
 			result, execErr := a.toolkit.Execute(ctx, toolName, args)
 			if execErr != nil {
+				toolSpan.RecordError(execErr)
+				toolSpan.SetStatus(codes.Error, execErr.Error())
+				toolSpan.End()
 				toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
 					toolID, execErr.Error(), true,
 				))
 				continue
 			}
+			toolSpan.SetStatus(codes.Ok, "")
+			toolSpan.End()
 
 			toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
 				toolID, result.Content, result.IsError,
@@ -225,7 +273,17 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		return assistantMsg, nil
 	}
 
+	span.SetStatus(codes.Ok, "")
 	return assistantMsg, nil
+}
+
+func tracingAttributes(extra ...attribute.KeyValue) []attribute.KeyValue {
+	attrs := make([]attribute.KeyValue, 0, len(extra)+1)
+	if sc := studio.GetClient(); sc != nil {
+		attrs = append(attrs, attribute.String("gen_ai.conversation.id", sc.RunID()))
+	}
+	attrs = append(attrs, extra...)
+	return attrs
 }
 
 func hasToolUse(msg *message.Msg) bool {
