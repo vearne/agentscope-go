@@ -83,6 +83,30 @@ func TestMsgToPayload_ToolResultBlock(t *testing.T) {
 	if blocks[0]["id"] != "t1" {
 		t.Errorf("expected id 't1', got %v", blocks[0]["id"])
 	}
+	if blocks[0]["name"] != "" {
+		t.Errorf("expected default name '', got %v", blocks[0]["name"])
+	}
+}
+
+func TestMsgToPayload_ToolResultOutputNormalization(t *testing.T) {
+	msg := &message.Msg{
+		ID:   "test-id",
+		Name: "tool",
+		Role: "tool",
+		Content: []message.ContentBlock{
+			message.NewToolResultBlock("t1", map[string]interface{}{"now": "2026-04-28 16:48:22"}, false),
+		},
+		Timestamp: "2026-04-24 10:00:00.000",
+	}
+	payload := MsgToPayload(msg)
+
+	blocks, ok := payload["content"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("expected content to be []map[string]interface{}, got %T", payload["content"])
+	}
+	if _, ok := blocks[0]["output"].(string); !ok {
+		t.Fatalf("expected normalized output to be string, got %T", blocks[0]["output"])
+	}
 }
 
 func TestMsgToPayload_NilMetadata(t *testing.T) {
