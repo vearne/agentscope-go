@@ -1,0 +1,299 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/vearne/agentscope-go/internal/utils"
+	"github.com/vearne/agentscope-go/pkg/formatter"
+	"github.com/vearne/agentscope-go/pkg/memory"
+	"github.com/vearne/agentscope-go/pkg/message"
+	"github.com/vearne/agentscope-go/pkg/model"
+	"github.com/vearne/agentscope-go/pkg/tool"
+)
+
+const avgCharsPerToken = 4
+
+type DeepAgent struct {
+	id        string
+	name      string
+	sysPrompt string
+	model     model.ChatModelBase
+	mem       memory.MemoryBase
+	fmt       formatter.FormatterBase
+	toolkit   *tool.Toolkit
+	maxIters  int
+
+	compressor       ContextCompressor
+	offloader        *OffloadManager
+	maxCtxTokens     int
+	offloadDir       string
+	offloadThreshold int
+
+	subFactory *SubagentFactory
+
+	internalToolkit *tool.Toolkit
+
+	hooks hooks
+}
+
+func NewDeepAgent(opts ...DeepOption) *DeepAgent {
+	a := &DeepAgent{
+		id:               utils.ShortUUID(),
+		name:             "deep_agent",
+		maxIters:         defaultDeepMaxIters,
+		maxCtxTokens:     defaultDeepMaxCtxTokens,
+		offloadDir:       defaultDeepOffloadDir,
+		offloadThreshold: defaultDeepOffloadThreshold,
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	if a.mem == nil {
+		a.mem = memory.NewInMemoryMemory()
+	}
+	if a.compressor == nil && a.model != nil && a.fmt != nil {
+		a.compressor = NewLLMCompressor(a.model, a.fmt, "")
+	}
+	if a.compressor == nil {
+		a.compressor = &TruncatingCompressor{}
+	}
+	a.offloader = NewOffloadManager(a.offloadDir, a.offloadThreshold)
+	a.buildInternalToolkit()
+	return a
+}
+
+func (a *DeepAgent) ID() string   { return a.id }
+func (a *DeepAgent) Name() string { return a.name }
+
+func (a *DeepAgent) Memory() memory.MemoryBase {
+	return a.mem
+}
+
+func (a *DeepAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, error) {
+	for _, h := range a.hooks.preReply {
+		h(ctx, a, msg, nil)
+	}
+
+	if msg != nil {
+		if err := a.mem.Add(ctx, msg); err != nil {
+			return nil, fmt.Errorf("add message to memory: %w", err)
+		}
+	}
+
+	if a.sysPrompt != "" {
+		sysMsg := message.NewMsg("system", a.sysPrompt, "system")
+		existing := a.mem.GetMessages()
+		restored := append([]*message.Msg{sysMsg}, existing...)
+		a.mem.Clear(ctx)
+		a.mem.Add(ctx, restored...)
+	}
+
+	var resp *message.Msg
+	var err error
+	for i := 0; i < a.maxIters; i++ {
+		a.maybeCompressContext(ctx)
+
+		resp, err = a.thinkAndAct(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !hasToolUse(resp) {
+			break
+		}
+	}
+
+	for _, h := range a.hooks.postReply {
+		h(ctx, a, msg, resp)
+	}
+	return resp, nil
+}
+
+func (a *DeepAgent) Observe(ctx context.Context, msg *message.Msg) error {
+	if msg != nil {
+		return a.mem.Add(ctx, msg)
+	}
+	return nil
+}
+
+func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
+	msgs := a.mem.GetMessages()
+	formatted, err := a.fmt.Format(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("format messages: %w", err)
+	}
+
+	var opts []model.CallOption
+	tk := a.internalToolkit
+	if tk == nil {
+		tk = a.toolkit
+	}
+	if tk != nil && len(tk.GetSchemas()) > 0 {
+		opts = append(opts, model.CallOption{
+			Tools:      tk.GetSchemas(),
+			ToolChoice: "auto",
+		})
+	}
+
+	chatResp, err := a.model.Call(ctx, formatted, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("model call: %w", err)
+	}
+
+	assistantMsg := &message.Msg{
+		ID:        utils.ShortUUID(),
+		Name:      a.name,
+		Role:      "assistant",
+		Content:   chatResp.Content,
+		Timestamp: time.Now().Format("2006-01-02 15:04:05.000"),
+	}
+	if err := a.mem.Add(ctx, assistantMsg); err != nil {
+		return nil, fmt.Errorf("add assistant message: %w", err)
+	}
+
+	if chatResp.HasToolUse() {
+		toolUseBlocks := chatResp.GetToolUseBlocks()
+		var toolResultBlocks []message.ContentBlock
+
+		for _, block := range toolUseBlocks {
+			toolName := message.GetBlockToolUseName(block)
+			toolID := message.GetBlockToolUseID(block)
+			toolInput := message.GetBlockToolUseInput(block)
+
+			args, ok := toMap(toolInput)
+			if !ok {
+				toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
+					toolID, fmt.Sprintf("invalid tool input: %v", toolInput), true,
+				))
+				continue
+			}
+
+			result, execErr := tk.Execute(ctx, toolName, args)
+			if execErr != nil {
+				toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
+					toolID, execErr.Error(), true,
+				))
+				continue
+			}
+
+			content := fmt.Sprintf("%v", result.Content)
+			if len(content) > a.offloadThreshold {
+				offloadID := utils.ShortUUID()
+				ref, offloaded := a.offloader.MaybeOffload(content, offloadID)
+				if offloaded {
+					result.Content = ref
+				}
+			}
+
+			toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
+				toolID, result.Content, result.IsError,
+			))
+		}
+
+		toolResultMsg := &message.Msg{
+			ID:        utils.ShortUUID(),
+			Name:      "tool",
+			Role:      "tool",
+			Content:   toolResultBlocks,
+			Timestamp: time.Now().Format("2006-01-02 15:04:05.000"),
+		}
+		if err := a.mem.Add(ctx, toolResultMsg); err != nil {
+			return nil, fmt.Errorf("add tool result: %w", err)
+		}
+	}
+
+	return assistantMsg, nil
+}
+
+func (a *DeepAgent) maybeCompressContext(ctx context.Context) {
+	msgs := a.mem.GetMessages()
+	estimated := estimateTokens(msgs)
+	threshold := int(float64(a.maxCtxTokens) * 0.85)
+
+	if estimated > threshold && len(msgs) > 6 {
+		compressed, err := a.compressor.Compress(ctx, msgs, 6)
+		if err != nil {
+			log.Printf("[DeepAgent] compression error: %v, continuing with original context", err)
+			return
+		}
+		a.mem.Clear(ctx)
+		a.mem.Add(ctx, compressed...)
+	}
+}
+
+func estimateTokens(msgs []*message.Msg) int {
+	totalChars := 0
+	for _, msg := range msgs {
+		for _, block := range msg.Content {
+			if text := message.GetBlockText(block); text != "" {
+				totalChars += len(text)
+			}
+		}
+	}
+	return totalChars / avgCharsPerToken
+}
+
+func (a *DeepAgent) buildInternalToolkit() {
+	if a.toolkit == nil && a.subFactory == nil {
+		return
+	}
+
+	a.internalToolkit = tool.NewToolkit()
+
+	if a.toolkit != nil {
+		schemas := a.toolkit.GetSchemas()
+		for _, s := range schemas {
+			toolName := s.Function.Name
+			a.internalToolkit.Register(s.Function.Name, s.Function.Description, s.Function.Parameters,
+				func(ctx context.Context, args map[string]interface{}) (*tool.ToolResponse, error) {
+					return a.toolkit.Execute(ctx, toolName, args)
+				},
+			)
+		}
+	}
+
+	if a.subFactory != nil {
+		a.internalToolkit.Register("delegate_task",
+			"Delegate a task to a subagent. The subagent runs independently with its own context. Use this for complex multi-step work that would clutter your context.",
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"task_description": map[string]interface{}{
+						"type":        "string",
+						"description": "Clear description of what the subagent should accomplish",
+					},
+					"subagent_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Name for the subagent",
+					},
+					"system_prompt": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional system prompt for the subagent",
+					},
+				},
+				"required": []string{"task_description", "subagent_name"},
+			},
+			func(ctx context.Context, args map[string]interface{}) (*tool.ToolResponse, error) {
+				desc, _ := args["task_description"].(string)
+				name, _ := args["subagent_name"].(string)
+				sysPrompt, _ := args["system_prompt"].(string)
+
+				if desc == "" || name == "" {
+					return tool.NewErrorResponse("task_description and subagent_name are required"), nil
+				}
+
+				result, err := a.subFactory.DelegateTask(ctx, DelegateTaskArgs{
+					TaskDescription: desc,
+					SubagentName:    name,
+					SystemPrompt:    sysPrompt,
+				})
+				if err != nil {
+					return tool.NewErrorResponse(fmt.Sprintf("subagent failed: %v", err)), nil
+				}
+				return tool.NewToolResponse(result), nil
+			},
+		)
+	}
+}
