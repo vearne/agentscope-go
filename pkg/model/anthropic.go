@@ -19,14 +19,18 @@ type AnthropicChatModel struct {
 	baseURL    string
 	stream     bool
 	httpClient *http.Client
+	config     *ModelConfig
 }
 
-func NewAnthropicChatModel(modelName, apiKey, baseURL string, stream bool) *AnthropicChatModel {
+type AnthropicModelOption func(*AnthropicChatModel)
+
+func NewAnthropicChatModel(modelName, apiKey, baseURL string, stream bool, opts ...AnthropicModelOption) *AnthropicChatModel {
 	if baseURL == "" {
 		baseURL = "https://api.anthropic.com"
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
-	return &AnthropicChatModel{
+
+	model := &AnthropicChatModel{
 		modelName: modelName,
 		apiKey:    apiKey,
 		baseURL:   baseURL,
@@ -35,10 +39,61 @@ func NewAnthropicChatModel(modelName, apiKey, baseURL string, stream bool) *Anth
 			Timeout: 300 * time.Second,
 		},
 	}
+
+	for _, opt := range opts {
+		opt(model)
+	}
+
+	return model
 }
 
 func (m *AnthropicChatModel) ModelName() string { return m.modelName }
 func (m *AnthropicChatModel) IsStream() bool    { return m.stream }
+
+func WithAnthropicTemperature(temp float64) AnthropicModelOption {
+	return func(m *AnthropicChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.Temperature = &temp
+	}
+}
+
+func WithAnthropicTopP(topP float64) AnthropicModelOption {
+	return func(m *AnthropicChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.TopP = &topP
+	}
+}
+
+func WithAnthropicTopK(topK int) AnthropicModelOption {
+	return func(m *AnthropicChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.TopK = &topK
+	}
+}
+
+func WithAnthropicMaxTokens(maxTokens int) AnthropicModelOption {
+	return func(m *AnthropicChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.MaxTokens = &maxTokens
+	}
+}
+
+func WithAnthropicStop(stop []string) AnthropicModelOption {
+	return func(m *AnthropicChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.Stop = stop
+	}
+}
 
 func (m *AnthropicChatModel) Call(ctx context.Context, messages []FormattedMessage, opts ...CallOption) (*ChatResponse, error) {
 	opt := m.mergeOpts(opts)
@@ -301,21 +356,38 @@ func (m *AnthropicChatModel) buildRequestBody(messages []FormattedMessage, opt C
 	}
 
 	body := map[string]interface{}{
-		"model":     m.modelName,
-		"messages":  filtered,
-		"max_tokens": 4096,
-		"stream":    stream,
+		"model":    m.modelName,
+		"messages": filtered,
+		"stream":   stream,
 	}
 
-	if opt.MaxTokens != nil {
-		body["max_tokens"] = *opt.MaxTokens
+	maxTokens := configValueInt(m.config.MaxTokens, opt.MaxTokens)
+	if maxTokens != nil {
+		body["max_tokens"] = *maxTokens
+	} else {
+		body["max_tokens"] = 4096
 	}
-	if opt.Temperature != nil {
-		body["temperature"] = *opt.Temperature
+
+	temp := configValueFloat64(m.config.Temperature, opt.Temperature)
+	if temp != nil {
+		body["temperature"] = *temp
 	}
-	if len(opt.Stop) > 0 {
-		body["stop_sequences"] = opt.Stop
+
+	topP := configValueFloat64(m.config.TopP, opt.TopP)
+	if topP != nil {
+		body["top_p"] = *topP
 	}
+
+	topK := configValueInt(m.config.TopK, opt.TopK)
+	if topK != nil {
+		body["top_k"] = *topK
+	}
+
+	stop := m.mergeStopSequences(opt.Stop)
+	if len(stop) > 0 {
+		body["stop_sequences"] = stop
+	}
+
 	if len(opt.Tools) > 0 {
 		body["tools"] = formatAnthropicTools(opt.Tools)
 	}
@@ -360,4 +432,13 @@ func formatAnthropicToolChoice(choice string) interface{} {
 			"name": choice,
 		}
 	}
+}
+
+func (m *AnthropicChatModel) mergeStopSequences(optStop []string) []string {
+	result := []string{}
+	if m.config != nil {
+		result = append(result, m.config.Stop...)
+	}
+	result = append(result, optStop...)
+	return result
 }

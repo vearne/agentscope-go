@@ -19,26 +19,117 @@ type OpenAIChatModel struct {
 	baseURL    string
 	stream     bool
 	httpClient *http.Client
+	config     *ModelConfig
 }
 
-func NewOpenAIChatModel(modelName, apiKey, baseURL string, stream bool) *OpenAIChatModel {
+type OpenAIModelOption func(*OpenAIChatModel)
+
+func NewOpenAIChatModel(modelName, apiKey, baseURL string, stream bool, opts ...OpenAIModelOption) *OpenAIChatModel {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
-	return &OpenAIChatModel{
-		modelName: modelName,
-		apiKey:    apiKey,
-		baseURL:   baseURL,
-		stream:    stream,
+
+	model := &OpenAIChatModel{
+		modelName:  modelName,
+		apiKey:     apiKey,
+		baseURL:    baseURL,
+		stream:     stream,
 		httpClient: &http.Client{
 			Timeout: 300 * time.Second,
 		},
 	}
+
+	for _, opt := range opts {
+		opt(model)
+	}
+
+	return model
 }
 
 func (m *OpenAIChatModel) ModelName() string { return m.modelName }
 func (m *OpenAIChatModel) IsStream() bool    { return m.stream }
+
+func WithTemperature(temp float64) OpenAIModelOption {
+	return func(m *OpenAIChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.Temperature = &temp
+	}
+}
+
+func WithTopP(topP float64) OpenAIModelOption {
+	return func(m *OpenAIChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.TopP = &topP
+	}
+}
+
+func WithMaxTokens(maxTokens int) OpenAIModelOption {
+	return func(m *OpenAIChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.MaxTokens = &maxTokens
+	}
+}
+
+func WithStop(stop []string) OpenAIModelOption {
+	return func(m *OpenAIChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.Stop = stop
+	}
+}
+
+func WithPresencePenalty(penalty float64) OpenAIModelOption {
+	return func(m *OpenAIChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.PresencePenalty = &penalty
+	}
+}
+
+func WithFrequencyPenalty(penalty float64) OpenAIModelOption {
+	return func(m *OpenAIChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.FrequencyPenalty = &penalty
+	}
+}
+
+func WithSeed(seed int) OpenAIModelOption {
+	return func(m *OpenAIChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.Seed = &seed
+	}
+}
+
+func WithResponseFormat(formatType string) OpenAIModelOption {
+	return func(m *OpenAIChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.ResponseFormat = &ResponseFormat{Type: formatType}
+	}
+}
+
+func WithUser(user string) OpenAIModelOption {
+	return func(m *OpenAIChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.User = &user
+	}
+}
 
 func (m *OpenAIChatModel) Call(ctx context.Context, messages []FormattedMessage, opts ...CallOption) (*ChatResponse, error) {
 	opt := m.mergeOpts(opts)
@@ -221,15 +312,51 @@ func (m *OpenAIChatModel) buildRequestBody(messages []FormattedMessage, opt Call
 		body["stream_options"] = map[string]interface{}{"include_usage": true}
 	}
 
-	if opt.Temperature != nil {
-		body["temperature"] = *opt.Temperature
+	temp := configValueFloat64(m.config.Temperature, opt.Temperature)
+	if temp != nil {
+		body["temperature"] = *temp
 	}
-	if opt.MaxTokens != nil {
-		body["max_tokens"] = *opt.MaxTokens
+
+	topP := configValueFloat64(m.config.TopP, opt.TopP)
+	if topP != nil {
+		body["top_p"] = *topP
 	}
-	if len(opt.Stop) > 0 {
-		body["stop"] = opt.Stop
+
+	maxTokens := configValueInt(m.config.MaxTokens, opt.MaxTokens)
+	if maxTokens != nil {
+		body["max_tokens"] = *maxTokens
 	}
+
+	stop := m.mergeStopSequences(opt.Stop)
+	if len(stop) > 0 {
+		body["stop"] = stop
+	}
+
+	presencePenalty := configValueFloat64(m.config.PresencePenalty, opt.PresencePenalty)
+	if presencePenalty != nil {
+		body["presence_penalty"] = *presencePenalty
+	}
+
+	frequencyPenalty := configValueFloat64(m.config.FrequencyPenalty, opt.FrequencyPenalty)
+	if frequencyPenalty != nil {
+		body["frequency_penalty"] = *frequencyPenalty
+	}
+
+	seed := configValueInt(m.config.Seed, opt.Seed)
+	if seed != nil {
+		body["seed"] = *seed
+	}
+
+	responseFormat := configValueResponseFormat(m.config.ResponseFormat, opt.ResponseFormat)
+	if responseFormat != nil {
+		body["response_format"] = responseFormat
+	}
+
+	user := configValueString(m.config.User, opt.User)
+	if user != nil {
+		body["user"] = *user
+	}
+
 	if len(opt.Tools) > 0 {
 		body["tools"] = formatOpenAITools(opt.Tools)
 	}
@@ -275,4 +402,13 @@ func formatOpenAIToolChoice(choice string) interface{} {
 			},
 		}
 	}
+}
+
+func (m *OpenAIChatModel) mergeStopSequences(optStop []string) []string {
+	result := []string{}
+	if m.config != nil {
+		result = append(result, m.config.Stop...)
+	}
+	result = append(result, optStop...)
+	return result
 }

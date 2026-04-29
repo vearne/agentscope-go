@@ -23,11 +23,49 @@ type ChatUsage struct {
 }
 
 type CallOption struct {
-	Tools       []ToolSchema
-	ToolChoice  string
+	// 工具相关
+	Tools      []ToolSchema
+	ToolChoice string
+
+	// 生成参数
 	Temperature *float64
+	TopP        *float64
+	TopK        *int
 	MaxTokens   *int
 	Stop        []string
+
+	// OpenAI 特定参数
+	PresencePenalty  *float64
+	FrequencyPenalty *float64
+	Seed             *int
+	ResponseFormat   *ResponseFormat
+
+	// 用户标识
+	User *string
+}
+
+// ResponseFormat defines the response format for OpenAI API
+type ResponseFormat struct {
+	Type string `json:"type"` // "text" or "json_object"
+}
+
+// ModelConfig holds default configuration parameters for a model
+type ModelConfig struct {
+	// 基础参数
+	Temperature *float64
+	TopP        *float64
+	TopK        *int
+	MaxTokens   *int
+	Stop        []string
+
+	// OpenAI 特定参数
+	PresencePenalty  *float64
+	FrequencyPenalty *float64
+	Seed             *int
+	ResponseFormat   *ResponseFormat
+
+	// 用户标识
+	User *string
 }
 
 type ToolSchema struct {
@@ -90,4 +128,32 @@ func validateToolChoice(toolChoice string, tools []ToolSchema) {
 			return
 		}
 	}
+}
+
+func configValueFloat64(defaultVal *float64, optVal *float64) *float64 {
+	if optVal != nil {
+		return optVal
+	}
+	return defaultVal
+}
+
+func configValueInt(defaultVal *int, optVal *int) *int {
+	if optVal != nil {
+		return optVal
+	}
+	return defaultVal
+}
+
+func configValueResponseFormat(defaultVal *ResponseFormat, optVal *ResponseFormat) *ResponseFormat {
+	if optVal != nil {
+		return optVal
+	}
+	return defaultVal
+}
+
+func configValueString(defaultVal *string, optVal *string) *string {
+	if optVal != nil {
+		return optVal
+	}
+	return defaultVal
 }

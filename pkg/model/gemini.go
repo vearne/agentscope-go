@@ -19,14 +19,18 @@ type GeminiChatModel struct {
 	baseURL    string
 	stream     bool
 	httpClient *http.Client
+	config     *ModelConfig
 }
 
-func NewGeminiChatModel(modelName, apiKey, baseURL string, stream bool) *GeminiChatModel {
+type GeminiModelOption func(*GeminiChatModel)
+
+func NewGeminiChatModel(modelName, apiKey, baseURL string, stream bool, opts ...GeminiModelOption) *GeminiChatModel {
 	if baseURL == "" {
 		baseURL = "https://generativelanguage.googleapis.com"
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
-	return &GeminiChatModel{
+
+	model := &GeminiChatModel{
 		modelName: modelName,
 		apiKey:    apiKey,
 		baseURL:   baseURL,
@@ -35,10 +39,61 @@ func NewGeminiChatModel(modelName, apiKey, baseURL string, stream bool) *GeminiC
 			Timeout: 300 * time.Second,
 		},
 	}
+
+	for _, opt := range opts {
+		opt(model)
+	}
+
+	return model
 }
 
 func (m *GeminiChatModel) ModelName() string { return m.modelName }
 func (m *GeminiChatModel) IsStream() bool    { return m.stream }
+
+func WithGeminiTemperature(temp float64) GeminiModelOption {
+	return func(m *GeminiChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.Temperature = &temp
+	}
+}
+
+func WithGeminiTopP(topP float64) GeminiModelOption {
+	return func(m *GeminiChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.TopP = &topP
+	}
+}
+
+func WithGeminiTopK(topK int) GeminiModelOption {
+	return func(m *GeminiChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.TopK = &topK
+	}
+}
+
+func WithGeminiMaxTokens(maxTokens int) GeminiModelOption {
+	return func(m *GeminiChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.MaxTokens = &maxTokens
+	}
+}
+
+func WithGeminiStop(stop []string) GeminiModelOption {
+	return func(m *GeminiChatModel) {
+		if m.config == nil {
+			m.config = &ModelConfig{}
+		}
+		m.config.Stop = stop
+	}
+}
 
 func (m *GeminiChatModel) Call(ctx context.Context, messages []FormattedMessage, opts ...CallOption) (*ChatResponse, error) {
 	opt := m.mergeOpts(opts)
@@ -288,29 +343,37 @@ func (m *GeminiChatModel) buildRequestBody(messages []FormattedMessage, opt Call
 		body["systemInstruction"] = systemInstruction
 	}
 
-	if opt.Temperature != nil {
-		body["generationConfig"] = map[string]interface{}{
-			"temperature": *opt.Temperature,
-		}
+	generationConfig := map[string]interface{}{}
+
+	temp := configValueFloat64(m.config.Temperature, opt.Temperature)
+	if temp != nil {
+		generationConfig["temperature"] = *temp
 	}
-	if opt.MaxTokens != nil {
-		if gc, ok := body["generationConfig"].(map[string]interface{}); ok {
-			gc["maxOutputTokens"] = *opt.MaxTokens
-		} else {
-			body["generationConfig"] = map[string]interface{}{
-				"maxOutputTokens": *opt.MaxTokens,
-			}
-		}
+
+	topP := configValueFloat64(m.config.TopP, opt.TopP)
+	if topP != nil {
+		generationConfig["topP"] = *topP
 	}
-	if len(opt.Stop) > 0 {
-		if gc, ok := body["generationConfig"].(map[string]interface{}); ok {
-			gc["stopSequences"] = opt.Stop
-		} else {
-			body["generationConfig"] = map[string]interface{}{
-				"stopSequences": opt.Stop,
-			}
-		}
+
+	topK := configValueInt(m.config.TopK, opt.TopK)
+	if topK != nil {
+		generationConfig["topK"] = *topK
 	}
+
+	maxTokens := configValueInt(m.config.MaxTokens, opt.MaxTokens)
+	if maxTokens != nil {
+		generationConfig["maxOutputTokens"] = *maxTokens
+	}
+
+	stop := m.mergeStopSequences(opt.Stop)
+	if len(stop) > 0 {
+		generationConfig["stopSequences"] = stop
+	}
+
+	if len(generationConfig) > 0 {
+		body["generationConfig"] = generationConfig
+	}
+
 	if len(opt.Tools) > 0 {
 		body["tools"] = formatGeminiTools(opt.Tools)
 	}
@@ -426,4 +489,13 @@ func (m *GeminiChatModel) mergeOpts(opts []CallOption) CallOption {
 		opt = opts[0]
 	}
 	return opt
+}
+
+func (m *GeminiChatModel) mergeStopSequences(optStop []string) []string {
+	result := []string{}
+	if m.config != nil {
+		result = append(result, m.config.Stop...)
+	}
+	result = append(result, optStop...)
+	return result
 }
