@@ -2,3 +2,4 @@
 vendor/
 .playwright-mcp/
 graphify-out/
+/memory_demo

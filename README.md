@@ -13,6 +13,7 @@ Inspired by [AgentScope](https://github.com/modelscope/agentscope), agentscope-g
 - **Streaming** — SSE-based streaming for all model providers
 - **Tool System** — Manual registration, reflection-based `RegisterFunc()` with struct tags, and built-in tools (shell, print)
 - **Pipelines** — Sequential, Fanout (parallel), ChatRoom, and MsgHub for multi-agent workflows
+- **Memory Management** — Multiple backends (InMemory, Redis, SQL) with mark-based filtering, long-term memory with semantic search
 - **Session Persistence** — JSON file and Redis-backed session storage
 - **A2A Protocol** — Agent-to-Agent HTTP server/client with service discovery and bus registry
 - **OpenTelemetry Tracing** — Built-in OTLP gRPC exporter with agent hooks for automatic instrumentation
@@ -77,7 +78,7 @@ pkg/
 ├── model/       # Model providers (OpenAI, Anthropic, Gemini)
 ├── formatter/   # Provider-specific message formatters
 ├── message/     # Message types and content blocks
-├── memory/      # Memory backends (in-memory)
+├── memory/      # Memory backends (InMemory, Redis, SQL) and long-term memory
 ├── pipeline/    # Multi-agent orchestration (Sequential, Fanout, ChatRoom, MsgHub)
 ├── tool/        # Tool registration and execution
 ├── session/     # Session persistence (JSON, Redis)
