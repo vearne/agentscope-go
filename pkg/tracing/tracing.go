@@ -143,8 +143,12 @@ func SetupTracingHTTP(ctx context.Context, endpoint string, opts ...TracingOptio
 		return nil, err
 	}
 
+	// Use a synchronous span processor for OTLP HTTP (e.g. agentscope-studio):
+	// short-lived CLIs often exit right after the last span ends; a batch
+	// processor may not flush before process exit, and Studio would show spans
+	// without the attributes set on End().
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithSyncer(exporter),
 		sdktrace.WithResource(res),
 	)
 

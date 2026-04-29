@@ -55,7 +55,7 @@ func main() {
 		),
 	)
 
-	msg := agent.NewUserMsg("user", "当前的时间是？")
+	msg := agent.NewUserMsg("user", "当前的时间是？后天是几号，星期几？")
 	resp, err := a.Reply(context.Background(), msg)
 	if err != nil {
 		log.Fatal(err)

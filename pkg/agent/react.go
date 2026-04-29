@@ -20,6 +20,61 @@ import (
 
 const defaultMaxIters = 10
 
+// gen_ai.*.messages OTEL attributes are strings; Studio parses JSON. Keep a
+// conservative size so OTLP collectors do not drop oversized spans.
+const maxGenAIMessagesAttrBytes = 32000
+
+func truncateGenAIMessagesJSON(s string) string {
+	if len(s) <= maxGenAIMessagesAttrBytes {
+		return s
+	}
+	return s[:maxGenAIMessagesAttrBytes] + "…[truncated]"
+}
+
+func stringifyGenAITracePayload(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		fallback, _ := json.Marshal(map[string]string{"error": err.Error()})
+		return truncateGenAIMessagesJSON(string(fallback))
+	}
+	return truncateGenAIMessagesJSON(string(b))
+}
+
+func genAIMessagesAttr(key string, v any) attribute.KeyValue {
+	return attribute.String(key, stringifyGenAITracePayload(v))
+}
+
+// spanIOAttrs sets both OpenTelemetry GenAI keys and flat "input"/"output"
+// keys. agentscope-studio's TraceDetailPage reads gen_ai.*.messages first,
+// then falls back to top-level "input" / "output"; flat keys also survive
+// attribute unflattening edge cases in the OTLP decoder.
+func spanIOAttrs(input, output any) []attribute.KeyValue {
+	in := stringifyGenAITracePayload(input)
+	out := stringifyGenAITracePayload(output)
+	return []attribute.KeyValue{
+		attribute.String("gen_ai.input.messages", in),
+		attribute.String("gen_ai.output.messages", out),
+		attribute.String("input", in),
+		attribute.String("output", out),
+	}
+}
+
+func spanInputAttrsOnly(input any) []attribute.KeyValue {
+	in := stringifyGenAITracePayload(input)
+	return []attribute.KeyValue{
+		attribute.String("gen_ai.input.messages", in),
+		attribute.String("input", in),
+	}
+}
+
+func spanOutputAttrsOnly(output any) []attribute.KeyValue {
+	out := stringifyGenAITracePayload(output)
+	return []attribute.KeyValue{
+		attribute.String("gen_ai.output.messages", out),
+		attribute.String("output", out),
+	}
+}
+
 type ReActOption func(*ReActAgent)
 
 func WithReActName(name string) ReActOption {
@@ -107,6 +162,10 @@ func (a *ReActAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg,
 	)...)
 	defer span.End()
 
+	if msg != nil {
+		span.SetAttributes(spanInputAttrsOnly([]*message.Msg{msg})...)
+	}
+
 	for _, h := range a.hooks.preReply {
 		h(ctx, a, msg, nil)
 	}
@@ -145,6 +204,10 @@ func (a *ReActAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg,
 		h(ctx, a, msg, resp)
 	}
 
+	if resp != nil {
+		span.SetAttributes(spanOutputAttrsOnly([]*message.Msg{resp})...)
+	}
+
 	span.SetStatus(codes.Ok, "")
 	return resp, nil
 }
@@ -170,6 +233,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 	)...)
 	formatted, err := a.fmt.Format(msgs)
 	if err != nil {
+		formatSpan.SetAttributes(spanInputAttrsOnly(msgs)...)
 		formatSpan.RecordError(err)
 		formatSpan.SetStatus(codes.Error, err.Error())
 		formatSpan.End()
@@ -177,6 +241,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("format messages: %w", err)
 	}
+	formatSpan.SetAttributes(spanIOAttrs(msgs, formatted)...)
 	formatSpan.SetStatus(codes.Ok, "")
 	formatSpan.End()
 
@@ -190,16 +255,19 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 
 	chatResp, err := a.model.Call(formatCtx, formatted, opts...)
 	if err != nil {
+		span.SetAttributes(spanInputAttrsOnly(formatted)...)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("model call: %w", err)
 	}
+	usageAttrs := spanIOAttrs(formatted, chatResp.Content)
 	if chatResp != nil && chatResp.Usage != nil {
-		span.SetAttributes(
+		usageAttrs = append(usageAttrs,
 			attribute.Int("gen_ai.usage.input_tokens", chatResp.Usage.InputTokens),
 			attribute.Int("gen_ai.usage.output_tokens", chatResp.Usage.OutputTokens),
 		)
 	}
+	span.SetAttributes(usageAttrs...)
 
 	assistantMsg := &message.Msg{
 		ID:        utils.ShortUUID(),
@@ -237,8 +305,12 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				attribute.String("gen_ai.operation.name", "execute_tool"),
 				attribute.String("gen_ai.tool.name", toolName),
 			)...)
+			toolSpan.SetAttributes(spanInputAttrsOnly(args)...)
 			result, execErr := a.toolkit.Execute(ctx, toolName, args)
 			if execErr != nil {
+				toolSpan.SetAttributes(spanOutputAttrsOnly(map[string]any{
+					"error": execErr.Error(),
+				})...)
 				toolSpan.RecordError(execErr)
 				toolSpan.SetStatus(codes.Error, execErr.Error())
 				toolSpan.End()
@@ -247,6 +319,11 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				))
 				continue
 			}
+			toolSpan.SetAttributes(spanOutputAttrsOnly(map[string]any{
+				"content":   result.Content,
+				"is_error":  result.IsError,
+				"tool_name": toolName,
+			})...)
 			toolSpan.SetStatus(codes.Ok, "")
 			toolSpan.End()
 
