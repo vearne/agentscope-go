@@ -117,12 +117,51 @@ func requireGenAIMessages(t *testing.T, s *recordedSpan, label string) {
 	if !json.Valid([]byte(in.AsString())) {
 		t.Fatalf("%s span gen_ai.input.messages is not valid JSON: %q", label, in.AsString())
 	}
+
+	var inMsgs []message.GenAIMessage
+	if err := json.Unmarshal([]byte(in.AsString()), &inMsgs); err != nil {
+		t.Fatalf("%s span gen_ai.input.messages is not valid GenAI format: %v", label, err)
+	}
+
+	for _, msg := range inMsgs {
+		if msg.Role == "" {
+			t.Errorf("%s span message missing role", label)
+		}
+		if len(msg.Parts) == 0 {
+			t.Logf("%s span message with no parts: %v", label, in.AsString())
+		}
+		for _, part := range msg.Parts {
+			if partType, ok := part["type"]; !ok || partType == "" {
+				t.Errorf("%s span part missing type", label)
+			}
+		}
+	}
+
 	out, ok := s.attrs["gen_ai.output.messages"]
 	if !ok {
 		t.Fatalf("%s span missing gen_ai.output.messages (have: %v)", label, attrKeys(s))
 	}
 	if !json.Valid([]byte(out.AsString())) {
 		t.Fatalf("%s span gen_ai.output.messages is not valid JSON: %q", label, out.AsString())
+	}
+
+	var outMsgs []message.GenAIMessage
+	if err := json.Unmarshal([]byte(out.AsString()), &outMsgs); err != nil {
+		t.Fatalf("%s span gen_ai.output.messages is not valid GenAI format: %v", label, err)
+	}
+
+	for _, msg := range outMsgs {
+		if msg.Role == "" {
+			t.Errorf("%s span message missing role", label)
+		}
+		if len(msg.Parts) == 0 {
+			t.Errorf("%s span message missing parts", label)
+		}
+		for _, part := range msg.Parts {
+			if partType, ok := part["type"]; !ok || partType == "" {
+				t.Errorf("%s span part missing type", label)
+			}
+		}
 	}
 }
 

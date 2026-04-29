@@ -15,13 +15,13 @@ import (
 )
 
 const (
-	defaultServiceName     = "agentscope-go"
-	instrumentationName    = "github.com/vearne/agentscope-go"
+	defaultServiceName  = "agentscope-go"
+	instrumentationName = "github.com/vearne/agentscope-go"
 )
 
 var (
-	globalMu  sync.Mutex
-	provider  *sdktrace.TracerProvider
+	globalMu sync.Mutex
+	provider *sdktrace.TracerProvider
 )
 
 type TracingOption func(*tracingConfig)
@@ -148,7 +148,7 @@ func SetupTracingHTTP(ctx context.Context, endpoint string, opts ...TracingOptio
 	// processor may not flush before process exit, and Studio would show spans
 	// without the attributes set on End().
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSyncer(exporter),
+		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
 	)
 

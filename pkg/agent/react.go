@@ -44,34 +44,83 @@ func genAIMessagesAttr(key string, v any) attribute.KeyValue {
 	return attribute.String(key, stringifyGenAITracePayload(v))
 }
 
+// toGenAIMessages converts various input types to GenAI message format.
+// Supports []*message.Msg, []message.ContentBlock, and []model.FormattedMessage.
+func toGenAIMessages(input any) []message.GenAIMessage {
+	switch v := input.(type) {
+	case []*message.Msg:
+		return message.ConvertMsgsToGenAIMessages(v)
+	case []message.ContentBlock:
+		if len(v) == 0 {
+			return []message.GenAIMessage{}
+		}
+		msg := &message.Msg{Content: v, Role: "user"}
+		return []message.GenAIMessage{message.ConvertMsgToGenAIMessage(msg)}
+	case []model.FormattedMessage:
+		if len(v) == 0 {
+			return []message.GenAIMessage{}
+		}
+		result := make([]message.GenAIMessage, len(v))
+		for i, fm := range v {
+			role, _ := fm["role"].(string)
+			content, _ := fm["content"].(string)
+			result[i] = message.GenAIMessage{
+				Role: role,
+				Parts: []message.GenAIPart{
+					{"type": "text", "content": content},
+				},
+				FinishReason: "stop",
+			}
+		}
+		return result
+	default:
+		if m, ok := input.(*message.Msg); ok {
+			return []message.GenAIMessage{message.ConvertMsgToGenAIMessage(m)}
+		}
+		return []message.GenAIMessage{}
+	}
+}
+
 // spanIOAttrs sets both OpenTelemetry GenAI keys and flat "input"/"output"
 // keys. agentscope-studio's TraceDetailPage reads gen_ai.*.messages first,
 // then falls back to top-level "input" / "output"; flat keys also survive
 // attribute unflattening edge cases in the OTLP decoder.
 func spanIOAttrs(input, output any) []attribute.KeyValue {
-	in := stringifyGenAITracePayload(input)
-	out := stringifyGenAITracePayload(output)
+	inMsgs := toGenAIMessages(input)
+	outMsgs := toGenAIMessages(output)
 	return []attribute.KeyValue{
-		attribute.String("gen_ai.input.messages", in),
-		attribute.String("gen_ai.output.messages", out),
-		attribute.String("input", in),
-		attribute.String("output", out),
+		attribute.String("gen_ai.input.messages", stringifyGenAITracePayload(inMsgs)),
+		attribute.String("gen_ai.output.messages", stringifyGenAITracePayload(outMsgs)),
+		attribute.String("input", stringifyGenAITracePayload(inMsgs)),
+		attribute.String("output", stringifyGenAITracePayload(outMsgs)),
 	}
 }
 
 func spanInputAttrsOnly(input any) []attribute.KeyValue {
-	in := stringifyGenAITracePayload(input)
+	inMsgs := toGenAIMessages(input)
 	return []attribute.KeyValue{
-		attribute.String("gen_ai.input.messages", in),
-		attribute.String("input", in),
+		attribute.String("gen_ai.input.messages", stringifyGenAITracePayload(inMsgs)),
+		attribute.String("input", stringifyGenAITracePayload(inMsgs)),
 	}
 }
 
 func spanOutputAttrsOnly(output any) []attribute.KeyValue {
-	out := stringifyGenAITracePayload(output)
+	outMsgs := toGenAIMessages(output)
 	return []attribute.KeyValue{
-		attribute.String("gen_ai.output.messages", out),
-		attribute.String("output", out),
+		attribute.String("gen_ai.output.messages", stringifyGenAITracePayload(outMsgs)),
+		attribute.String("output", stringifyGenAITracePayload(outMsgs)),
+	}
+}
+
+func spanToolInputAttrsOnly(args map[string]any) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("gen_ai.tool.call.arguments", stringifyGenAITracePayload(args)),
+	}
+}
+
+func spanToolOutputAttrsOnly(result map[string]any) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("gen_ai.tool.call.result", stringifyGenAITracePayload(result)),
 	}
 }
 
@@ -305,10 +354,10 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				attribute.String("gen_ai.operation.name", "execute_tool"),
 				attribute.String("gen_ai.tool.name", toolName),
 			)...)
-			toolSpan.SetAttributes(spanInputAttrsOnly(args)...)
+			toolSpan.SetAttributes(spanToolInputAttrsOnly(args)...)
 			result, execErr := a.toolkit.Execute(ctx, toolName, args)
 			if execErr != nil {
-				toolSpan.SetAttributes(spanOutputAttrsOnly(map[string]any{
+				toolSpan.SetAttributes(spanToolOutputAttrsOnly(map[string]any{
 					"error": execErr.Error(),
 				})...)
 				toolSpan.RecordError(execErr)
@@ -319,7 +368,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				))
 				continue
 			}
-			toolSpan.SetAttributes(spanOutputAttrsOnly(map[string]any{
+			toolSpan.SetAttributes(spanToolOutputAttrsOnly(map[string]any{
 				"content":   result.Content,
 				"is_error":  result.IsError,
 				"tool_name": toolName,
