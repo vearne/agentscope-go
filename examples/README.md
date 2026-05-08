@@ -29,6 +29,7 @@ go run ./examples/hello
 | [tool_usage](./tool_usage) | Tool registration: manual, reflection-based (`RegisterFunc`), and built-in tools |
 | [agent_skill](./agent_skill) | Agent skills: register SKILL.md directories, generate skill prompts, custom templates |
 | [session_persistence](./session_persistence) | Save and restore agent memory using JSON file sessions |
+| [deep_agent](./deep_agent) | DeepAgent with context compression, result offloading, and subagent delegation |
 | [multi_model](./multi_model) | Using OpenAI, Anthropic, and Gemini model providers |
 
 ### Workflow
@@ -91,6 +92,7 @@ export GEMINI_API_KEY="AIza..."
 ### Multi-Model
 
 - **multi_model** — Demonstrates using different model providers (OpenAI, Anthropic, Gemini) with their respective formatters. Skips providers without API keys.
+- **deep_agent** — DeepAgent for long-running tasks with automatic context compression (LLM summarization or truncation), large result offloading to disk, and subagent delegation to independent workers.
 
 ### Pipelines
 
