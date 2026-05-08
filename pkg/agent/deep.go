@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vearne/agentscope-go/internal/utils"
@@ -37,6 +39,10 @@ type DeepAgent struct {
 	internalToolkit *tool.Toolkit
 
 	hooks hooks
+
+	interrupted atomic.Bool
+	cancelMu    sync.Mutex
+	cancelFunc  context.CancelFunc
 }
 
 func NewDeepAgent(opts ...DeepOption) *DeepAgent {
@@ -91,6 +97,19 @@ func (a *DeepAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, 
 		a.mem.Add(ctx, restored...)
 	}
 
+	a.interrupted.Store(false)
+	ctx, cancel := context.WithCancel(ctx)
+	a.cancelMu.Lock()
+	a.cancelFunc = cancel
+	a.cancelMu.Unlock()
+	defer func() {
+		cancel()
+		a.interrupted.Store(false)
+		a.cancelMu.Lock()
+		a.cancelFunc = nil
+		a.cancelMu.Unlock()
+	}()
+
 	var resp *message.Msg
 	var err error
 	for i := 0; i < a.maxIters; i++ {
@@ -98,8 +117,16 @@ func (a *DeepAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, 
 
 		resp, err = a.thinkAndAct(ctx)
 		if err != nil {
+			if a.interrupted.Load() {
+				return a.HandleInterrupt(ctx, msg)
+			}
 			return nil, err
 		}
+
+		if a.interrupted.Load() {
+			return a.HandleInterrupt(ctx, msg)
+		}
+
 		if !hasToolUse(resp) {
 			break
 		}
@@ -116,6 +143,34 @@ func (a *DeepAgent) Observe(ctx context.Context, msg *message.Msg) error {
 		return a.mem.Add(ctx, msg)
 	}
 	return nil
+}
+
+func (a *DeepAgent) Interrupt() {
+	a.interrupted.Store(true)
+	a.cancelMu.Lock()
+	if a.cancelFunc != nil {
+		a.cancelFunc()
+	}
+	a.cancelMu.Unlock()
+}
+
+func (a *DeepAgent) HandleInterrupt(ctx context.Context, msg *message.Msg) (*message.Msg, error) {
+	resp := &message.Msg{
+		ID:        utils.ShortUUID(),
+		Name:      a.name,
+		Role:      "assistant",
+		Content:   []message.ContentBlock{message.NewTextBlock("I noticed that you have interrupted me. What can I do for you?")},
+		Metadata:  map[string]interface{}{"_is_interrupted": true},
+		Timestamp: time.Now().Format("2006-01-02 15:04:05.000"),
+	}
+	if err := a.mem.Add(ctx, resp); err != nil {
+		return nil, fmt.Errorf("add interrupted message to memory: %w", err)
+	}
+
+	for _, h := range a.hooks.postReply {
+		h(ctx, a, msg, resp)
+	}
+	return resp, nil
 }
 
 func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
