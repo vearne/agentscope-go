@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vearne/agentscope-go/internal/utils"
@@ -172,6 +174,10 @@ type ReActAgent struct {
 	toolkit   *tool.Toolkit
 	maxIters  int
 	hooks     hooks
+
+	interrupted atomic.Bool
+	cancelMu    sync.Mutex
+	cancelFunc  context.CancelFunc
 }
 
 func NewReActAgent(opts ...ReActOption) *ReActAgent {
@@ -235,15 +241,52 @@ func (a *ReActAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg,
 		a.mem.Add(ctx, restored...)
 	}
 
+	a.interrupted.Store(false)
+	ctx, cancel := context.WithCancel(ctx)
+	a.cancelMu.Lock()
+	a.cancelFunc = cancel
+	a.cancelMu.Unlock()
+	defer func() {
+		cancel()
+		a.interrupted.Store(false)
+		a.cancelMu.Lock()
+		a.cancelFunc = nil
+		a.cancelMu.Unlock()
+	}()
+
 	var resp *message.Msg
 	var err error
 	for i := 0; i < a.maxIters; i++ {
 		resp, err = a.thinkAndAct(ctx)
 		if err != nil {
+			if a.interrupted.Load() {
+				span.AddEvent("interrupted")
+				hResp, hErr := a.HandleInterrupt(ctx, msg)
+				if hErr != nil {
+					span.RecordError(hErr)
+					span.SetStatus(codes.Error, hErr.Error())
+					return nil, hErr
+				}
+				span.SetStatus(codes.Ok, "")
+				return hResp, nil
+			}
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
+
+		if a.interrupted.Load() {
+			span.AddEvent("interrupted")
+			hResp, hErr := a.HandleInterrupt(ctx, msg)
+			if hErr != nil {
+				span.RecordError(hErr)
+				span.SetStatus(codes.Error, hErr.Error())
+				return nil, hErr
+			}
+			span.SetStatus(codes.Ok, "")
+			return hResp, nil
+		}
+
 		if !hasToolUse(resp) {
 			break
 		}
@@ -410,6 +453,38 @@ func tracingAttributes(extra ...attribute.KeyValue) []attribute.KeyValue {
 	}
 	attrs = append(attrs, extra...)
 	return attrs
+}
+
+func (a *ReActAgent) Interrupt() {
+	a.interrupted.Store(true)
+	a.cancelMu.Lock()
+	if a.cancelFunc != nil {
+		a.cancelFunc()
+	}
+	a.cancelMu.Unlock()
+}
+
+func (a *ReActAgent) HandleInterrupt(ctx context.Context, msg *message.Msg) (*message.Msg, error) {
+	resp := &message.Msg{
+		ID:        utils.ShortUUID(),
+		Name:      a.name,
+		Role:      "assistant",
+		Content:   []message.ContentBlock{message.NewTextBlock("I noticed that you have interrupted me. What can I do for you?")},
+		Metadata:  map[string]interface{}{"_is_interrupted": true},
+		Timestamp: time.Now().Format("2006-01-02 15:04:05.000"),
+	}
+	if err := a.mem.Add(ctx, resp); err != nil {
+		return nil, fmt.Errorf("add interrupted message to memory: %w", err)
+	}
+
+	for _, h := range a.hooks.postReply {
+		h(ctx, a, msg, resp)
+	}
+
+	if sc := studio.GetClient(); sc != nil {
+		studio.ForwardMessage(ctx, a.name, "assistant", resp)
+	}
+	return resp, nil
 }
 
 func hasToolUse(msg *message.Msg) bool {
