@@ -289,6 +289,12 @@ func (c *A2AClient) ID() string {
 	return ""
 }
 
+func (c *A2AClient) Interrupt() {}
+
+func (c *A2AClient) HandleInterrupt(_ context.Context, _ *message.Msg) (*message.Msg, error) {
+	return nil, fmt.Errorf("A2AClient does not support interrupt handling")
+}
+
 // Compile-time check that A2AClient implements agent.AgentBase.
 var _ agent.AgentBase = (*A2AClient)(nil)
 

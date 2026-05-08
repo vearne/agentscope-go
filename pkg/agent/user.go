@@ -61,6 +61,12 @@ func (a *UserAgent) readInput() string {
 	return line
 }
 
+func (a *UserAgent) Interrupt() {}
+
+func (a *UserAgent) HandleInterrupt(_ context.Context, _ *message.Msg) (*message.Msg, error) {
+	return nil, fmt.Errorf("UserAgent does not support interrupt handling")
+}
+
 func NewUserMsg(name, content string) *message.Msg {
 	msg := message.NewMsg(name, content, "user")
 	msg.Timestamp = time.Now().Format("2006-01-02 15:04:05.000")
