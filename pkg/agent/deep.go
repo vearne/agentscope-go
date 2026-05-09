@@ -14,6 +14,9 @@ import (
 	"github.com/vearne/agentscope-go/pkg/message"
 	"github.com/vearne/agentscope-go/pkg/model"
 	"github.com/vearne/agentscope-go/pkg/tool"
+	"github.com/vearne/agentscope-go/pkg/tracing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 const avgCharsPerToken = 4
@@ -173,13 +176,42 @@ func (a *DeepAgent) HandleInterrupt(ctx context.Context, msg *message.Msg) (*mes
 	return resp, nil
 }
 
+// thinkAndAct executes a single iteration of the DeepAgent loop:
+//  1. Format the conversation history from memory into a provider-specific request
+//  2. Call the LLM (with user tools + internal tools like delegate_task)
+//  3. If the LLM requests tool calls, execute each tool, optionally offload large results to disk
+//
+// Unlike ReActAgent, this function does NOT forward messages to a studio UI.
+// The caller (Reply loop) handles iteration control and context compression.
 func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
+	ctx, span := tracing.StartSpan(ctx, "chat "+a.model.ModelName(), tracingAttributes(
+		attribute.String("gen_ai.operation.name", "chat"),
+		attribute.String("gen_ai.request.model", a.model.ModelName()),
+	)...)
+	defer span.End()
+
+	// --- Step 1: Format conversation history ---
 	msgs := a.mem.GetMessages()
+	formatCtx, formatSpan := tracing.StartSpan(ctx, "format "+a.name, tracingAttributes(
+		attribute.String("gen_ai.operation.name", "format"),
+		attribute.String("gen_ai.agent.name", a.name),
+	)...)
 	formatted, err := a.fmt.Format(msgs)
 	if err != nil {
+		formatSpan.SetAttributes(spanInputAttrsOnly(msgs)...)
+		formatSpan.RecordError(err)
+		formatSpan.SetStatus(codes.Error, err.Error())
+		formatSpan.End()
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("format messages: %w", err)
 	}
+	formatSpan.SetAttributes(spanIOAttrs(msgs, formatted)...)
+	formatSpan.SetStatus(codes.Ok, "")
+	formatSpan.End()
 
+	// --- Step 2: Call the LLM ---
+	// internalToolkit wraps user tools and adds delegate_task; fall back to user toolkit
 	var opts []model.CallOption
 	tk := a.internalToolkit
 	if tk == nil {
@@ -192,11 +224,23 @@ func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		})
 	}
 
-	chatResp, err := a.model.Call(ctx, formatted, opts...)
+	chatResp, err := a.model.Call(formatCtx, formatted, opts...)
 	if err != nil {
+		span.SetAttributes(spanInputAttrsOnly(formatted)...)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("model call: %w", err)
 	}
+	usageAttrs := spanIOAttrs(formatted, chatResp.Content)
+	if chatResp != nil && chatResp.Usage != nil {
+		usageAttrs = append(usageAttrs,
+			attribute.Int("gen_ai.usage.input_tokens", chatResp.Usage.InputTokens),
+			attribute.Int("gen_ai.usage.output_tokens", chatResp.Usage.OutputTokens),
+		)
+	}
+	span.SetAttributes(usageAttrs...)
 
+	// --- Step 3: Persist the assistant's response ---
 	assistantMsg := &message.Msg{
 		ID:        utils.ShortUUID(),
 		Name:      a.name,
@@ -208,6 +252,7 @@ func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		return nil, fmt.Errorf("add assistant message: %w", err)
 	}
 
+	// --- Step 4: Handle tool calls (if any) ---
 	if chatResp.HasToolUse() {
 		toolUseBlocks := chatResp.GetToolUseBlocks()
 		var toolResultBlocks []message.ContentBlock
@@ -225,14 +270,27 @@ func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				continue
 			}
 
+			// Execute the tool with its own tracing span
+			_, toolSpan := tracing.StartSpan(ctx, "execute_tool "+toolName, tracingAttributes(
+				attribute.String("gen_ai.operation.name", "execute_tool"),
+				attribute.String("gen_ai.tool.name", toolName),
+			)...)
+			toolSpan.SetAttributes(spanToolInputAttrsOnly(args)...)
 			result, execErr := tk.Execute(ctx, toolName, args)
 			if execErr != nil {
+				toolSpan.SetAttributes(spanToolOutputAttrsOnly(map[string]any{
+					"error": execErr.Error(),
+				})...)
+				toolSpan.RecordError(execErr)
+				toolSpan.SetStatus(codes.Error, execErr.Error())
+				toolSpan.End()
 				toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
 					toolID, execErr.Error(), true,
 				))
 				continue
 			}
 
+			// Offload large tool outputs to disk to avoid bloating the context window
 			content := fmt.Sprintf("%v", result.Content)
 			if len(content) > a.offloadThreshold {
 				offloadID := utils.ShortUUID()
@@ -241,6 +299,14 @@ func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 					result.Content = ref
 				}
 			}
+
+			toolSpan.SetAttributes(spanToolOutputAttrsOnly(map[string]any{
+				"content":   result.Content,
+				"is_error":  result.IsError,
+				"tool_name": toolName,
+			})...)
+			toolSpan.SetStatus(codes.Ok, "")
+			toolSpan.End()
 
 			toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
 				toolID, result.Content, result.IsError,
@@ -259,6 +325,7 @@ func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		}
 	}
 
+	span.SetStatus(codes.Ok, "")
 	return assistantMsg, nil
 }
 

@@ -311,13 +311,23 @@ func (a *ReActAgent) Observe(ctx context.Context, msg *message.Msg) error {
 	return nil
 }
 
+// thinkAndAct executes a single iteration of the ReAct loop:
+//  1. Format the conversation history from memory into a provider-specific request
+//  2. Call the LLM to get a response (with optional tool schemas)
+//  3. If the LLM requests tool calls, execute each tool and collect results into memory
+//
+// The caller (Reply loop) decides whether to iterate again based on whether tool results
+// were produced. This function only handles one think-and-act step.
 func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
+	// --- Top-level tracing span for the entire chat call ---
 	ctx, span := tracing.StartSpan(ctx, "chat "+a.model.ModelName(), tracingAttributes(
 		attribute.String("gen_ai.operation.name", "chat"),
 		attribute.String("gen_ai.request.model", a.model.ModelName()),
 	)...)
 	defer span.End()
 
+	// --- Step 1: Format conversation history ---
+	// Convert internal Msg objects into the model provider's expected request format
 	msgs := a.mem.GetMessages()
 	formatCtx, formatSpan := tracing.StartSpan(ctx, "format "+a.name, tracingAttributes(
 		attribute.String("gen_ai.operation.name", "format"),
@@ -337,6 +347,8 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 	formatSpan.SetStatus(codes.Ok, "")
 	formatSpan.End()
 
+	// --- Step 2: Call the LLM ---
+	// Attach tool schemas if a toolkit is configured, allowing the model to request tool use
 	var opts []model.CallOption
 	if a.toolkit != nil && len(a.toolkit.GetSchemas()) > 0 {
 		opts = append(opts, model.CallOption{
@@ -361,6 +373,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 	}
 	span.SetAttributes(usageAttrs...)
 
+	// --- Step 3: Persist the assistant's response ---
 	assistantMsg := &message.Msg{
 		ID:        utils.ShortUUID(),
 		Name:      a.name,
@@ -372,10 +385,14 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		return nil, fmt.Errorf("add assistant message: %w", err)
 	}
 
+	// Forward to studio UI if connected
 	if sc := studio.GetClient(); sc != nil {
 		studio.ForwardMessage(ctx, a.name, "assistant", assistantMsg)
 	}
 
+	// --- Step 4: Handle tool calls (if any) ---
+	// When the model returns tool_use blocks, execute each tool and collect the results.
+	// The tool results are stored in memory so the next iteration can see them.
 	if chatResp.HasToolUse() {
 		toolUseBlocks := chatResp.GetToolUseBlocks()
 		var toolResultBlocks []message.ContentBlock
@@ -385,6 +402,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 			toolID := message.GetBlockToolUseID(block)
 			toolInput := message.GetBlockToolUseInput(block)
 
+			// Parse tool input into a map; if parsing fails, record an error result
 			args, ok := toMap(toolInput)
 			if !ok {
 				toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
@@ -393,6 +411,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				continue
 			}
 
+			// Execute the tool with its own tracing span
 			_, toolSpan := tracing.StartSpan(ctx, "execute_tool "+toolName, tracingAttributes(
 				attribute.String("gen_ai.operation.name", "execute_tool"),
 				attribute.String("gen_ai.tool.name", toolName),
@@ -406,6 +425,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				toolSpan.RecordError(execErr)
 				toolSpan.SetStatus(codes.Error, execErr.Error())
 				toolSpan.End()
+				// Record execution error as a tool result so the LLM can react to it
 				toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
 					toolID, execErr.Error(), true,
 				))
@@ -424,6 +444,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 			))
 		}
 
+		// Store all tool results as a single "tool" message in memory
 		toolResultMsg := &message.Msg{
 			ID:        utils.ShortUUID(),
 			Name:      "tool",
@@ -442,6 +463,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		return assistantMsg, nil
 	}
 
+	// No tool calls — the model gave a direct text response, this iteration is complete
 	span.SetStatus(codes.Ok, "")
 	return assistantMsg, nil
 }
