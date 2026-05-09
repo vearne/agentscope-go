@@ -38,6 +38,7 @@ func NewOpenAIChatModel(modelName, apiKey, baseURL string, stream bool, opts ...
 		httpClient: &http.Client{
 			Timeout: 300 * time.Second,
 		},
+		config: &ModelConfig{},
 	}
 
 	for _, opt := range opts {
