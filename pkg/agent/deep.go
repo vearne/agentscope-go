@@ -13,6 +13,7 @@ import (
 	"github.com/vearne/agentscope-go/pkg/memory"
 	"github.com/vearne/agentscope-go/pkg/message"
 	"github.com/vearne/agentscope-go/pkg/model"
+	"github.com/vearne/agentscope-go/pkg/studio"
 	"github.com/vearne/agentscope-go/pkg/tool"
 	"github.com/vearne/agentscope-go/pkg/tracing"
 	"go.opentelemetry.io/otel/attribute"
@@ -63,6 +64,14 @@ func NewDeepAgent(opts ...DeepOption) *DeepAgent {
 	if a.mem == nil {
 		a.mem = memory.NewInMemoryMemory()
 	}
+	if sc := studio.GetClient(); sc != nil {
+		a.hooks.preReply = append(a.hooks.preReply, func(ctx context.Context, ag AgentBase, msg *message.Msg, resp *message.Msg) {
+			studio.ForwardMessage(ctx, msg.Name, msg.Role, msg)
+		})
+		a.hooks.postReply = append(a.hooks.postReply, func(ctx context.Context, ag AgentBase, msg *message.Msg, resp *message.Msg) {
+			studio.ForwardMessage(ctx, ag.Name(), "assistant", resp)
+		})
+	}
 	if a.compressor == nil && a.model != nil && a.fmt != nil {
 		a.compressor = NewLLMCompressor(a.model, a.fmt, "")
 	}
@@ -82,12 +91,24 @@ func (a *DeepAgent) Memory() memory.MemoryBase {
 }
 
 func (a *DeepAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, error) {
+	ctx, span := tracing.StartSpan(ctx, "invoke_agent "+a.name, tracingAttributes(
+		attribute.String("gen_ai.operation.name", "invoke_agent"),
+		attribute.String("gen_ai.agent.name", a.name),
+	)...)
+	defer span.End()
+
+	if msg != nil {
+		span.SetAttributes(spanInputAttrsOnly([]*message.Msg{msg})...)
+	}
+
 	for _, h := range a.hooks.preReply {
 		h(ctx, a, msg, nil)
 	}
 
 	if msg != nil {
 		if err := a.mem.Add(ctx, msg); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return nil, fmt.Errorf("add message to memory: %w", err)
 		}
 	}
@@ -97,9 +118,13 @@ func (a *DeepAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, 
 		existing := a.mem.GetMessages()
 		restored := append([]*message.Msg{sysMsg}, existing...)
 		if err := a.mem.Clear(ctx); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return nil, fmt.Errorf("clear memory: %w", err)
 		}
 		if err := a.mem.Add(ctx, restored...); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return nil, fmt.Errorf("add messages to memory: %w", err)
 		}
 	}
@@ -125,13 +150,31 @@ func (a *DeepAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, 
 		resp, err = a.thinkAndAct(ctx)
 		if err != nil {
 			if a.interrupted.Load() {
-				return a.HandleInterrupt(ctx, msg)
+				span.AddEvent("interrupted")
+				hResp, hErr := a.HandleInterrupt(ctx, msg)
+				if hErr != nil {
+					span.RecordError(hErr)
+					span.SetStatus(codes.Error, hErr.Error())
+					return nil, hErr
+				}
+				span.SetStatus(codes.Ok, "")
+				return hResp, nil
 			}
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
 
 		if a.interrupted.Load() {
-			return a.HandleInterrupt(ctx, msg)
+			span.AddEvent("interrupted")
+			hResp, hErr := a.HandleInterrupt(ctx, msg)
+			if hErr != nil {
+				span.RecordError(hErr)
+				span.SetStatus(codes.Error, hErr.Error())
+				return nil, hErr
+			}
+			span.SetStatus(codes.Ok, "")
+			return hResp, nil
 		}
 
 		if !hasToolUse(resp) {
@@ -142,6 +185,12 @@ func (a *DeepAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, 
 	for _, h := range a.hooks.postReply {
 		h(ctx, a, msg, resp)
 	}
+
+	if resp != nil {
+		span.SetAttributes(spanOutputAttrsOnly([]*message.Msg{resp})...)
+	}
+
+	span.SetStatus(codes.Ok, "")
 	return resp, nil
 }
 
@@ -177,6 +226,10 @@ func (a *DeepAgent) HandleInterrupt(ctx context.Context, msg *message.Msg) (*mes
 	for _, h := range a.hooks.postReply {
 		h(ctx, a, msg, resp)
 	}
+
+	if sc := studio.GetClient(); sc != nil {
+		studio.ForwardMessage(ctx, a.name, "assistant", resp)
+	}
 	return resp, nil
 }
 
@@ -185,7 +238,6 @@ func (a *DeepAgent) HandleInterrupt(ctx context.Context, msg *message.Msg) (*mes
 //  2. Call the LLM (with user tools + internal tools like delegate_task)
 //  3. If the LLM requests tool calls, execute each tool, optionally offload large results to disk
 //
-// Unlike ReActAgent, this function does NOT forward messages to a studio UI.
 // The caller (Reply loop) handles iteration control and context compression.
 func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 	ctx, span := tracing.StartSpan(ctx, "chat "+a.model.ModelName(), tracingAttributes(
@@ -259,6 +311,11 @@ func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		return nil, fmt.Errorf("add assistant message: %w", err)
 	}
 
+	// Forward to studio UI if connected
+	if sc := studio.GetClient(); sc != nil {
+		studio.ForwardMessage(ctx, a.name, "assistant", assistantMsg)
+	}
+
 	// --- Step 4: Handle tool calls (if any) ---
 	if chatResp.HasToolUse() {
 		toolUseBlocks := chatResp.GetToolUseBlocks()
@@ -329,6 +386,10 @@ func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		}
 		if err := a.mem.Add(ctx, toolResultMsg); err != nil {
 			return nil, fmt.Errorf("add tool result: %w", err)
+		}
+
+		if sc := studio.GetClient(); sc != nil {
+			studio.ForwardMessage(ctx, "tool", "tool", toolResultMsg)
 		}
 	}
 
