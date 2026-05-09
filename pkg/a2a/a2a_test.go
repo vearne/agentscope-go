@@ -3,6 +3,7 @@ package a2a
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -25,6 +26,12 @@ func (m *mockAgent) Observe(_ context.Context, _ *message.Msg) error {
 
 func (m *mockAgent) Name() string { return m.name }
 func (m *mockAgent) ID() string   { return m.id }
+
+func (m *mockAgent) Interrupt() {}
+
+func (m *mockAgent) HandleInterrupt(_ context.Context, _ *message.Msg) (*message.Msg, error) {
+	return nil, fmt.Errorf("mockAgent does not support interrupt handling")
+}
 
 func freePort(t *testing.T) string {
 	t.Helper()

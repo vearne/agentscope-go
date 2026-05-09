@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/vearne/agentscope-go/pkg/formatter"
 	"github.com/vearne/agentscope-go/pkg/memory"
@@ -283,4 +285,248 @@ func TestInterfaceCompliance(t *testing.T) {
 	var _ AgentBase = NewUserAgent("user")
 	var _ formatter.FormatterBase = &mockFormatter{}
 	var _ memory.MemoryBase = memory.NewInMemoryMemory()
+}
+
+// --- context-aware mock for interrupt tests ---
+
+type ctxAwareMockModel struct {
+	responses []*model.ChatResponse
+	callCount int32
+	delay     time.Duration
+}
+
+func (m *ctxAwareMockModel) Call(ctx context.Context, _ []model.FormattedMessage, _ ...model.CallOption) (*model.ChatResponse, error) {
+	if m.delay > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(m.delay):
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	idx := int(atomic.AddInt32(&m.callCount, 1)) - 1
+	if idx >= len(m.responses) {
+		return nil, fmt.Errorf("no more mock responses")
+	}
+	return m.responses[idx], nil
+}
+
+func (m *ctxAwareMockModel) Stream(_ context.Context, _ []model.FormattedMessage, _ ...model.CallOption) (<-chan model.ChatResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *ctxAwareMockModel) ModelName() string { return "ctx_aware_mock" }
+func (m *ctxAwareMockModel) IsStream() bool    { return false }
+
+// --- Interrupt tests ---
+
+func TestReActAgent_Interrupt(t *testing.T) {
+	delayModel := &ctxAwareMockModel{
+		delay: 5 * time.Second,
+		responses: []*model.ChatResponse{
+			model.NewChatResponse([]message.ContentBlock{
+				message.NewTextBlock("should not see this"),
+			}),
+		},
+	}
+
+	agent := NewReActAgent(
+		WithReActModel(delayModel),
+		WithReActFormatter(&mockFormatter{}),
+	)
+
+	type result struct {
+		resp *message.Msg
+		err  error
+	}
+	done := make(chan result, 1)
+
+	go func() {
+		resp, err := agent.Reply(context.Background(), NewUserMsg("user", "test"))
+		done <- result{resp, err}
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	agent.Interrupt()
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("expected no error on interrupt, got: %v", r.err)
+		}
+		if r.resp == nil {
+			t.Fatal("expected non-nil response")
+		}
+		if r.resp.Metadata == nil {
+			t.Fatal("expected metadata on interrupted response")
+		}
+		isInt, ok := r.resp.Metadata["_is_interrupted"].(bool)
+		if !ok || !isInt {
+			t.Error("expected _is_interrupted metadata to be true")
+		}
+		if r.resp.GetTextContent() == "should not see this" {
+			t.Error("should not have received the model response after interrupt")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Reply did not return after interrupt within timeout")
+	}
+}
+
+func TestReActAgent_InterruptBetweenIterations(t *testing.T) {
+	// The model returns tool_use on the first call, then would return text
+	// on the second call.  We interrupt after the tool executes but before
+	// the second model call by using a slow second call.
+	firstCall := int32(0)
+	betweenModel := &ctxAwareMockModel{
+		responses: []*model.ChatResponse{
+			{
+				Content: []message.ContentBlock{
+					message.NewToolUseBlock("call_1", "some_tool", map[string]interface{}{}),
+				},
+			},
+			model.NewChatResponse([]message.ContentBlock{
+				message.NewTextBlock("second response"),
+			}),
+		},
+	}
+	betweenModel.delay = 5 * time.Second // make ALL calls slow
+
+	tk := tool.NewToolkit()
+	tk.Register("some_tool", "A tool", map[string]interface{}{"type": "object"},
+		func(_ context.Context, _ map[string]interface{}) (*tool.ToolResponse, error) {
+			atomic.StoreInt32(&firstCall, 1)
+			return &tool.ToolResponse{Content: "ok"}, nil
+		},
+	)
+
+	agent := NewReActAgent(
+		WithReActModel(betweenModel),
+		WithReActFormatter(&mockFormatter{}),
+		WithReActToolkit(tk),
+	)
+
+	type result struct {
+		resp *message.Msg
+		err  error
+	}
+	done := make(chan result, 1)
+
+	go func() {
+		resp, err := agent.Reply(context.Background(), NewUserMsg("user", "test"))
+		done <- result{resp, err}
+	}()
+
+	// Wait for the first iteration's tool to complete, then the second
+	// model call will be blocked by the 5s delay.  Interrupt there.
+	time.Sleep(200 * time.Millisecond)
+	agent.Interrupt()
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("expected no error, got: %v", r.err)
+		}
+		if r.resp.Metadata == nil {
+			t.Fatal("expected metadata")
+		}
+		isInt, ok := r.resp.Metadata["_is_interrupted"].(bool)
+		if !ok || !isInt {
+			t.Error("expected _is_interrupted to be true")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for interrupt response")
+	}
+}
+
+func TestReActAgent_HandleInterrupt(t *testing.T) {
+	agent := NewReActAgent(
+		WithReActName("test_agent"),
+		WithReActModel(&mockModel{}),
+		WithReActFormatter(&mockFormatter{}),
+	)
+
+	resp, err := agent.HandleInterrupt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("HandleInterrupt failed: %v", err)
+	}
+
+	if resp.Name != "test_agent" {
+		t.Errorf("expected name 'test_agent', got '%s'", resp.Name)
+	}
+	if resp.Role != "assistant" {
+		t.Errorf("expected role 'assistant', got '%s'", resp.Role)
+	}
+	if resp.Metadata == nil {
+		t.Fatal("expected metadata")
+	}
+	isInt, ok := resp.Metadata["_is_interrupted"].(bool)
+	if !ok || !isInt {
+		t.Error("expected _is_interrupted to be true")
+	}
+	if agent.Memory().Size() != 1 {
+		t.Errorf("expected 1 message in memory, got %d", agent.Memory().Size())
+	}
+}
+
+func TestReActAgent_InterruptNotRunning(t *testing.T) {
+	agent := NewReActAgent(
+		WithReActModel(&mockModel{}),
+		WithReActFormatter(&mockFormatter{}),
+	)
+
+	// Calling Interrupt when no Reply is running should not panic
+	agent.Interrupt()
+}
+
+func TestReActAgent_InterruptResetOnNewReply(t *testing.T) {
+	delayModel := &ctxAwareMockModel{
+		delay: 100 * time.Millisecond,
+		responses: []*model.ChatResponse{
+			model.NewChatResponse([]message.ContentBlock{
+				message.NewTextBlock("normal"),
+			}),
+		},
+	}
+
+	agent := NewReActAgent(
+		WithReActModel(delayModel),
+		WithReActFormatter(&mockFormatter{}),
+	)
+
+	type result struct {
+		resp *message.Msg
+		err  error
+	}
+	done1 := make(chan result, 1)
+	go func() {
+		resp, err := agent.Reply(context.Background(), NewUserMsg("user", "test1"))
+		done1 <- result{resp, err}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	agent.Interrupt()
+
+	r1 := <-done1
+	if r1.err != nil {
+		t.Fatalf("first reply: %v", r1.err)
+	}
+	if isInt, _ := r1.resp.Metadata["_is_interrupted"].(bool); !isInt {
+		t.Error("first reply should be interrupted")
+	}
+
+	// Second reply uses the same mock; since the first call was cancelled
+	// during the delay, callCount was not incremented.
+	resp2, err := agent.Reply(context.Background(), NewUserMsg("user", "test2"))
+	if err != nil {
+		t.Fatalf("second reply failed: %v", err)
+	}
+	if resp2.GetTextContent() != "normal" {
+		t.Errorf("second reply got: %s", resp2.GetTextContent())
+	}
+	if resp2.Metadata != nil {
+		t.Error("second reply should not have interrupt metadata")
+	}
 }

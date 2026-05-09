@@ -9,13 +9,13 @@ import (
 )
 
 type Msg struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Role         string                 `json:"role"`
-	Content      []ContentBlock         `json:"content"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	Timestamp    string                 `json:"timestamp"`
-	InvocationID string                 `json:"invocation_id,omitempty"`
+	ID           string         `json:"id"`
+	Name         string         `json:"name"`
+	Role         string         `json:"role"`
+	Content      []ContentBlock `json:"content"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	Timestamp    string         `json:"timestamp"`
+	InvocationID string         `json:"invocation_id,omitempty"`
 }
 
 func NewMsg(name string, content interface{}, role string) *Msg {

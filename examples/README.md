@@ -29,7 +29,9 @@ go run ./examples/hello
 | [tool_usage](./tool_usage) | Tool registration: manual, reflection-based (`RegisterFunc`), and built-in tools |
 | [agent_skill](./agent_skill) | Agent skills: register SKILL.md directories, generate skill prompts, custom templates |
 | [session_persistence](./session_persistence) | Save and restore agent memory using JSON file sessions |
+| [deep_agent](./deep_agent) | DeepAgent with context compression, result offloading, and subagent delegation |
 | [multi_model](./multi_model) | Using OpenAI, Anthropic, and Gemini model providers |
+| [interrupt_agent](./interrupt_agent) | Interrupting a running agent with `Interrupt()` and graceful `HandleInterrupt()` |
 
 ### Workflow
 
@@ -91,6 +93,11 @@ export GEMINI_API_KEY="AIza..."
 ### Multi-Model
 
 - **multi_model** — Demonstrates using different model providers (OpenAI, Anthropic, Gemini) with their respective formatters. Skips providers without API keys.
+- **deep_agent** — DeepAgent for long-running tasks with automatic context compression (LLM summarization or truncation), large result offloading to disk, and subagent delegation to independent workers.
+
+### Interrupt
+
+- **interrupt_agent** — Demonstrates how to interrupt a running agent from another goroutine using `Interrupt()`. Shows the graceful `HandleInterrupt()` response with `_is_interrupted` metadata, and that the agent can be reused after interruption.
 
 ### Pipelines
 

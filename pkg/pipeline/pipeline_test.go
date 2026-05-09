@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/vearne/agentscope-go/pkg/agent"
@@ -27,6 +28,12 @@ func (a *mockAgent) Observe(_ context.Context, msg *message.Msg) error {
 
 func (a *mockAgent) Name() string { return a.name }
 func (a *mockAgent) ID() string   { return a.id }
+
+func (a *mockAgent) Interrupt() {}
+
+func (a *mockAgent) HandleInterrupt(_ context.Context, _ *message.Msg) (*message.Msg, error) {
+	return nil, fmt.Errorf("mockAgent does not support interrupt handling")
+}
 
 func TestSequentialPipeline(t *testing.T) {
 	agents := []agent.AgentBase{

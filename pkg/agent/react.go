@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vearne/agentscope-go/internal/utils"
@@ -172,6 +174,10 @@ type ReActAgent struct {
 	toolkit   *tool.Toolkit
 	maxIters  int
 	hooks     hooks
+
+	interrupted atomic.Bool
+	cancelMu    sync.Mutex
+	cancelFunc  context.CancelFunc
 }
 
 func NewReActAgent(opts ...ReActOption) *ReActAgent {
@@ -235,15 +241,52 @@ func (a *ReActAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg,
 		a.mem.Add(ctx, restored...)
 	}
 
+	a.interrupted.Store(false)
+	ctx, cancel := context.WithCancel(ctx)
+	a.cancelMu.Lock()
+	a.cancelFunc = cancel
+	a.cancelMu.Unlock()
+	defer func() {
+		cancel()
+		a.interrupted.Store(false)
+		a.cancelMu.Lock()
+		a.cancelFunc = nil
+		a.cancelMu.Unlock()
+	}()
+
 	var resp *message.Msg
 	var err error
 	for i := 0; i < a.maxIters; i++ {
 		resp, err = a.thinkAndAct(ctx)
 		if err != nil {
+			if a.interrupted.Load() {
+				span.AddEvent("interrupted")
+				hResp, hErr := a.HandleInterrupt(ctx, msg)
+				if hErr != nil {
+					span.RecordError(hErr)
+					span.SetStatus(codes.Error, hErr.Error())
+					return nil, hErr
+				}
+				span.SetStatus(codes.Ok, "")
+				return hResp, nil
+			}
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
+
+		if a.interrupted.Load() {
+			span.AddEvent("interrupted")
+			hResp, hErr := a.HandleInterrupt(ctx, msg)
+			if hErr != nil {
+				span.RecordError(hErr)
+				span.SetStatus(codes.Error, hErr.Error())
+				return nil, hErr
+			}
+			span.SetStatus(codes.Ok, "")
+			return hResp, nil
+		}
+
 		if !hasToolUse(resp) {
 			break
 		}
@@ -268,13 +311,23 @@ func (a *ReActAgent) Observe(ctx context.Context, msg *message.Msg) error {
 	return nil
 }
 
+// thinkAndAct executes a single iteration of the ReAct loop:
+//  1. Format the conversation history from memory into a provider-specific request
+//  2. Call the LLM to get a response (with optional tool schemas)
+//  3. If the LLM requests tool calls, execute each tool and collect results into memory
+//
+// The caller (Reply loop) decides whether to iterate again based on whether tool results
+// were produced. This function only handles one think-and-act step.
 func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
+	// --- Top-level tracing span for the entire chat call ---
 	ctx, span := tracing.StartSpan(ctx, "chat "+a.model.ModelName(), tracingAttributes(
 		attribute.String("gen_ai.operation.name", "chat"),
 		attribute.String("gen_ai.request.model", a.model.ModelName()),
 	)...)
 	defer span.End()
 
+	// --- Step 1: Format conversation history ---
+	// Convert internal Msg objects into the model provider's expected request format
 	msgs := a.mem.GetMessages()
 	formatCtx, formatSpan := tracing.StartSpan(ctx, "format "+a.name, tracingAttributes(
 		attribute.String("gen_ai.operation.name", "format"),
@@ -294,6 +347,8 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 	formatSpan.SetStatus(codes.Ok, "")
 	formatSpan.End()
 
+	// --- Step 2: Call the LLM ---
+	// Attach tool schemas if a toolkit is configured, allowing the model to request tool use
 	var opts []model.CallOption
 	if a.toolkit != nil && len(a.toolkit.GetSchemas()) > 0 {
 		opts = append(opts, model.CallOption{
@@ -318,6 +373,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 	}
 	span.SetAttributes(usageAttrs...)
 
+	// --- Step 3: Persist the assistant's response ---
 	assistantMsg := &message.Msg{
 		ID:        utils.ShortUUID(),
 		Name:      a.name,
@@ -329,10 +385,14 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		return nil, fmt.Errorf("add assistant message: %w", err)
 	}
 
+	// Forward to studio UI if connected
 	if sc := studio.GetClient(); sc != nil {
 		studio.ForwardMessage(ctx, a.name, "assistant", assistantMsg)
 	}
 
+	// --- Step 4: Handle tool calls (if any) ---
+	// When the model returns tool_use blocks, execute each tool and collect the results.
+	// The tool results are stored in memory so the next iteration can see them.
 	if chatResp.HasToolUse() {
 		toolUseBlocks := chatResp.GetToolUseBlocks()
 		var toolResultBlocks []message.ContentBlock
@@ -342,6 +402,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 			toolID := message.GetBlockToolUseID(block)
 			toolInput := message.GetBlockToolUseInput(block)
 
+			// Parse tool input into a map; if parsing fails, record an error result
 			args, ok := toMap(toolInput)
 			if !ok {
 				toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
@@ -350,6 +411,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				continue
 			}
 
+			// Execute the tool with its own tracing span
 			_, toolSpan := tracing.StartSpan(ctx, "execute_tool "+toolName, tracingAttributes(
 				attribute.String("gen_ai.operation.name", "execute_tool"),
 				attribute.String("gen_ai.tool.name", toolName),
@@ -363,6 +425,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 				toolSpan.RecordError(execErr)
 				toolSpan.SetStatus(codes.Error, execErr.Error())
 				toolSpan.End()
+				// Record execution error as a tool result so the LLM can react to it
 				toolResultBlocks = append(toolResultBlocks, message.NewToolResultBlock(
 					toolID, execErr.Error(), true,
 				))
@@ -381,6 +444,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 			))
 		}
 
+		// Store all tool results as a single "tool" message in memory
 		toolResultMsg := &message.Msg{
 			ID:        utils.ShortUUID(),
 			Name:      "tool",
@@ -399,6 +463,7 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		return assistantMsg, nil
 	}
 
+	// No tool calls — the model gave a direct text response, this iteration is complete
 	span.SetStatus(codes.Ok, "")
 	return assistantMsg, nil
 }
@@ -410,6 +475,38 @@ func tracingAttributes(extra ...attribute.KeyValue) []attribute.KeyValue {
 	}
 	attrs = append(attrs, extra...)
 	return attrs
+}
+
+func (a *ReActAgent) Interrupt() {
+	a.interrupted.Store(true)
+	a.cancelMu.Lock()
+	if a.cancelFunc != nil {
+		a.cancelFunc()
+	}
+	a.cancelMu.Unlock()
+}
+
+func (a *ReActAgent) HandleInterrupt(ctx context.Context, msg *message.Msg) (*message.Msg, error) {
+	resp := &message.Msg{
+		ID:        utils.ShortUUID(),
+		Name:      a.name,
+		Role:      "assistant",
+		Content:   []message.ContentBlock{message.NewTextBlock("I noticed that you have interrupted me. What can I do for you?")},
+		Metadata:  map[string]interface{}{"_is_interrupted": true},
+		Timestamp: time.Now().Format("2006-01-02 15:04:05.000"),
+	}
+	if err := a.mem.Add(ctx, resp); err != nil {
+		return nil, fmt.Errorf("add interrupted message to memory: %w", err)
+	}
+
+	for _, h := range a.hooks.postReply {
+		h(ctx, a, msg, resp)
+	}
+
+	if sc := studio.GetClient(); sc != nil {
+		studio.ForwardMessage(ctx, a.name, "assistant", resp)
+	}
+	return resp, nil
 }
 
 func hasToolUse(msg *message.Msg) bool {

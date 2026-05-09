@@ -29,6 +29,7 @@ go run ./examples/hello
 | [tool_usage](./tool_usage) | 工具注册：手动注册、反射注册（`RegisterFunc`）和内置工具 |
 | [agent_skill](./agent_skill) | Agent 技能：注册 SKILL.md 目录、生成技能提示词、自定义模板 |
 | [session_persistence](./session_persistence) | 使用 JSON 文件会话保存和恢复 Agent 记忆 |
+| [deep_agent](./deep_agent) | DeepAgent：上下文压缩、结果卸载和子 Agent 委托 |
 | [multi_model](./multi_model) | 同时使用 OpenAI、Anthropic、Gemini 模型提供商 |
 
 ### 工作流
@@ -89,6 +90,7 @@ export GEMINI_API_KEY="AIza..."
 ### 多模型
 
 - **multi_model** — 演示使用不同模型提供商（OpenAI、Anthropic、Gemini）及其对应的 Formatter。未配置 API Key 的提供商会自动跳过。
+- **deep_agent** — DeepAgent 用于长时间运行的任务，支持自动上下文压缩（LLM 摘要或截断）、大结果卸载到磁盘、以及子 Agent 委托。
 
 ### 流水线
 
