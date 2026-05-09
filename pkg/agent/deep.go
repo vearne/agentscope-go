@@ -211,6 +211,11 @@ func (a *DeepAgent) Interrupt() {
 }
 
 func (a *DeepAgent) HandleInterrupt(ctx context.Context, msg *message.Msg) (*message.Msg, error) {
+	// Use a context that is not cancelled so that Studio forwarding and
+	// post-reply hooks can complete. The caller's ctx is already cancelled
+	// because Interrupt() invoked cancelFunc().
+	studioCtx := context.WithoutCancel(ctx)
+
 	resp := &message.Msg{
 		ID:        utils.ShortUUID(),
 		Name:      a.name,
@@ -219,16 +224,16 @@ func (a *DeepAgent) HandleInterrupt(ctx context.Context, msg *message.Msg) (*mes
 		Metadata:  map[string]interface{}{"_is_interrupted": true},
 		Timestamp: time.Now().Format("2006-01-02 15:04:05.000"),
 	}
-	if err := a.mem.Add(ctx, resp); err != nil {
+	if err := a.mem.Add(studioCtx, resp); err != nil {
 		return nil, fmt.Errorf("add interrupted message to memory: %w", err)
 	}
 
 	for _, h := range a.hooks.postReply {
-		h(ctx, a, msg, resp)
+		h(studioCtx, a, msg, resp)
 	}
 
 	if sc := studio.GetClient(); sc != nil {
-		studio.ForwardMessage(ctx, a.name, "assistant", resp)
+		studio.ForwardMessage(studioCtx, a.name, "assistant", resp)
 	}
 	return resp, nil
 }
