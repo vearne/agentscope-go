@@ -1,5 +1,7 @@
 # agentscope-go
 
+[![golang-ci](https://github.com/vearne/agentscope-go/actions/workflows/golang-ci.yml/badge.svg)](https://github.com/vearne/agentscope-go/actions/workflows/golang-ci.yml)
+
 [中文文档](./README_zh.md)
 
 A Go framework for building multi-agent LLM applications with a modular, composable architecture.
