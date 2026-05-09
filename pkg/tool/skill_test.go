@@ -129,7 +129,9 @@ Content.
 `)
 
 	tk := NewToolkit()
-	tk.RegisterAgentSkill(dir)
+	if err := tk.RegisterAgentSkill(dir); err != nil {
+		t.Fatalf("RegisterAgentSkill failed: %v", err)
+	}
 
 	if err := tk.RemoveAgentSkill("Test Skill"); err != nil {
 		t.Fatalf("RemoveAgentSkill failed: %v", err)
@@ -165,7 +167,9 @@ Weather instructions.
 `)
 
 	tk := NewToolkit()
-	tk.RegisterAgentSkill(dir)
+	if err := tk.RegisterAgentSkill(dir); err != nil {
+		t.Fatalf("RegisterAgentSkill failed: %v", err)
+	}
 
 	prompt := tk.GetAgentSkillPrompt()
 	if !strings.Contains(prompt, "# Agent Skills") {
@@ -204,8 +208,12 @@ Beta content.
 `)
 
 	tk := NewToolkit()
-	tk.RegisterAgentSkill(dir1)
-	tk.RegisterAgentSkill(dir2)
+	if err := tk.RegisterAgentSkill(dir1); err != nil {
+		t.Fatalf("RegisterAgentSkill failed: %v", err)
+	}
+	if err := tk.RegisterAgentSkill(dir2); err != nil {
+		t.Fatalf("RegisterAgentSkill failed: %v", err)
+	}
 
 	prompt := tk.GetAgentSkillPrompt()
 	if !strings.Contains(prompt, "Skill Alpha") {
@@ -227,7 +235,9 @@ Content.
 `)
 
 	tk := NewToolkit()
-	tk.RegisterAgentSkill(dir)
+	if err := tk.RegisterAgentSkill(dir); err != nil {
+		t.Fatalf("RegisterAgentSkill failed: %v", err)
+	}
 
 	custom := "SKILL: %s | DESC: %s | PATH: %s"
 	prompt := tk.GetAgentSkillPromptWithTemplate("Custom Header", custom)
@@ -413,8 +423,12 @@ B content.
 `)
 
 	tk := NewToolkit()
-	tk.RegisterAgentSkillWithTools(dir1)
-	tk.RegisterAgentSkillWithTools(dir2)
+	if err := tk.RegisterAgentSkillWithTools(dir1); err != nil {
+		t.Fatalf("RegisterAgentSkillWithTools dir1 failed: %v", err)
+	}
+	if err := tk.RegisterAgentSkillWithTools(dir2); err != nil {
+		t.Fatalf("RegisterAgentSkillWithTools dir2 failed: %v", err)
+	}
 
 	skills := tk.GetAgentSkills()
 	if len(skills) != 2 {
@@ -437,7 +451,9 @@ First.
 `)
 
 	tk := NewToolkit()
-	tk.RegisterAgentSkill(dir)
+	if err := tk.RegisterAgentSkill(dir); err != nil {
+		t.Fatalf("RegisterAgentSkill failed: %v", err)
+	}
 
 	writeSkillMD(t, dir, `---
 name: Unique
@@ -446,7 +462,9 @@ description: Second.
 
 Second.
 `)
-	tk.RegisterAgentSkill(dir)
+	if err := tk.RegisterAgentSkill(dir); err != nil {
+		t.Fatalf("RegisterAgentSkill failed: %v", err)
+	}
 
 	skills := tk.GetAgentSkills()
 	if len(skills) != 1 {

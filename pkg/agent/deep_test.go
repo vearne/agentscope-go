@@ -219,11 +219,13 @@ func TestSubagentFactory_CreateWithCustomToolkit(t *testing.T) {
 		},
 	}
 	customTK := tool.NewToolkit()
-	customTK.Register("custom_tool", "A custom tool", map[string]interface{}{"type": "object"},
+	if err := customTK.Register("custom_tool", "A custom tool", map[string]interface{}{"type": "object"},
 		func(_ context.Context, _ map[string]interface{}) (*tool.ToolResponse, error) {
 			return tool.NewToolResponse("custom result"), nil
 		},
-	)
+	); err != nil {
+		t.Fatalf("register custom tool: %v", err)
+	}
 
 	factory := NewSubagentFactory(mockM, &mockFormatter{}, nil)
 	sub := factory.Create(SubagentConfig{
@@ -335,11 +337,13 @@ func TestDeepAgent_SimpleReply(t *testing.T) {
 
 func TestDeepAgent_ToolUse(t *testing.T) {
 	tk := tool.NewToolkit()
-	tk.Register("calc", "Calculate", map[string]interface{}{"type": "object"},
+	if err := tk.Register("calc", "Calculate", map[string]interface{}{"type": "object"},
 		func(_ context.Context, _ map[string]interface{}) (*tool.ToolResponse, error) {
 			return tool.NewToolResponse("42"), nil
 		},
-	)
+	); err != nil {
+		t.Fatalf("register calc tool: %v", err)
+	}
 	mockM := &mockModel{
 		responses: []*model.ChatResponse{
 			{
@@ -372,11 +376,13 @@ func TestDeepAgent_Offloading(t *testing.T) {
 	bigResult := strings.Repeat("data line\n", 2000)
 
 	tk := tool.NewToolkit()
-	tk.Register("big_tool", "Returns big data", map[string]interface{}{"type": "object"},
+	if err := tk.Register("big_tool", "Returns big data", map[string]interface{}{"type": "object"},
 		func(_ context.Context, _ map[string]interface{}) (*tool.ToolResponse, error) {
 			return tool.NewToolResponse(bigResult), nil
 		},
-	)
+	); err != nil {
+		t.Fatalf("register big_tool: %v", err)
+	}
 	mockM := &mockModel{
 		responses: []*model.ChatResponse{
 			{
@@ -447,7 +453,9 @@ func TestDeepAgent_SystemPrompt(t *testing.T) {
 		WithDeepSystemPrompt("You are a deep agent."),
 		WithDeepCompressor(&TruncatingCompressor{}),
 	)
-	ag.Reply(context.Background(), NewUserMsg("user", "hello"))
+	if _, err := ag.Reply(context.Background(), NewUserMsg("user", "hello")); err != nil {
+		t.Fatalf("Reply: %v", err)
+	}
 	msgs := ag.Memory().GetMessages()
 	found := false
 	for _, m := range msgs {
@@ -478,7 +486,9 @@ func TestDeepAgent_Compression(t *testing.T) {
 		WithDeepMaxContextTokens(200),
 		WithDeepCompressor(&TruncatingCompressor{}),
 	)
-	ag.Reply(context.Background(), NewUserMsg("user", "hello"))
+	if _, err := ag.Reply(context.Background(), NewUserMsg("user", "hello")); err != nil {
+		t.Fatalf("Reply: %v", err)
+	}
 	msgs := ag.Memory().GetMessages()
 	if len(msgs) > 20 {
 		t.Errorf("expected compression to bound memory, got %d messages", len(msgs))
@@ -504,7 +514,9 @@ func TestDeepAgent_Hooks(t *testing.T) {
 			postCalled = true
 		}),
 	)
-	ag.Reply(context.Background(), NewUserMsg("user", "test"))
+	if _, err := ag.Reply(context.Background(), NewUserMsg("user", "test")); err != nil {
+		t.Fatalf("Reply: %v", err)
+	}
 	if !preCalled {
 		t.Error("pre-reply hook not called")
 	}

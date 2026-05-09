@@ -1,5 +1,7 @@
 # agentscope-go
 
+[![golang-ci](https://github.com/vearne/agentscope-go/actions/workflows/golang-ci.yml/badge.svg)](https://github.com/vearne/agentscope-go/actions/workflows/golang-ci.yml)
+
 [English](./README.md)
 
 一个用于构建多 Agent LLM 应用的 Go 框架，采用模块化、可组合的架构设计。

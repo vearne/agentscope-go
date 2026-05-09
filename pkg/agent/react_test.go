@@ -87,12 +87,14 @@ func TestReActAgent_ToolUse(t *testing.T) {
 		city, _ := args["city"].(string)
 		return &tool.ToolResponse{Content: "sunny, 25°C in " + city}, nil
 	}
-	tk.Register("get_weather", "Get weather", map[string]interface{}{
+	if err := tk.Register("get_weather", "Get weather", map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
 			"city": map[string]interface{}{"type": "string"},
 		},
-	}, weatherFn)
+	}, weatherFn); err != nil {
+		t.Fatalf("register get_weather: %v", err)
+	}
 
 	mockM := &mockModel{
 		responses: []*model.ChatResponse{
@@ -145,11 +147,13 @@ func TestReActAgent_MaxIters(t *testing.T) {
 	}
 
 	tk := tool.NewToolkit()
-	tk.Register("some_tool", "A tool", map[string]interface{}{"type": "object"},
+	if err := tk.Register("some_tool", "A tool", map[string]interface{}{"type": "object"},
 		func(_ context.Context, _ map[string]interface{}) (*tool.ToolResponse, error) {
 			return &tool.ToolResponse{Content: "ok"}, nil
 		},
-	)
+	); err != nil {
+		t.Fatalf("register some_tool: %v", err)
+	}
 
 	agent := NewReActAgent(
 		WithReActModel(infiniteToolUse),
@@ -208,7 +212,9 @@ func TestReActAgent_Hooks(t *testing.T) {
 		}),
 	)
 
-	agent.Reply(context.Background(), NewUserMsg("user", "test"))
+	if _, err := agent.Reply(context.Background(), NewUserMsg("user", "test")); err != nil {
+		t.Fatalf("Reply: %v", err)
+	}
 
 	if !preCalled {
 		t.Error("pre-reply hook not called")
@@ -252,7 +258,9 @@ func TestReActAgent_SystemPrompt(t *testing.T) {
 		WithReActSystemPrompt("You are a helpful assistant."),
 	)
 
-	agent.Reply(context.Background(), NewUserMsg("user", "hello"))
+	if _, err := agent.Reply(context.Background(), NewUserMsg("user", "hello")); err != nil {
+		t.Fatalf("Reply: %v", err)
+	}
 
 	msgs := agent.Memory().GetMessages()
 	found := false
@@ -396,12 +404,14 @@ func TestReActAgent_InterruptBetweenIterations(t *testing.T) {
 	betweenModel.delay = 5 * time.Second // make ALL calls slow
 
 	tk := tool.NewToolkit()
-	tk.Register("some_tool", "A tool", map[string]interface{}{"type": "object"},
+	if err := tk.Register("some_tool", "A tool", map[string]interface{}{"type": "object"},
 		func(_ context.Context, _ map[string]interface{}) (*tool.ToolResponse, error) {
 			atomic.StoreInt32(&firstCall, 1)
 			return &tool.ToolResponse{Content: "ok"}, nil
 		},
-	)
+	); err != nil {
+		t.Fatalf("register some_tool: %v", err)
+	}
 
 	agent := NewReActAgent(
 		WithReActModel(betweenModel),

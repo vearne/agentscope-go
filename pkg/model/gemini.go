@@ -115,7 +115,7 @@ func (m *GeminiChatModel) Call(ctx context.Context, messages []FormattedMessage,
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -152,7 +152,7 @@ func (m *GeminiChatModel) Stream(ctx context.Context, messages []FormattedMessag
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -227,7 +227,7 @@ func (m *GeminiChatModel) parseCompletion(data []byte) (*ChatResponse, error) {
 
 func (m *GeminiChatModel) consumeStream(body io.ReadCloser, ch chan<- ChatResponse) {
 	defer close(ch)
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	text := ""
 	thinking := ""

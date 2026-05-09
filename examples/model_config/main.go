@@ -46,7 +46,7 @@ func example1(ctx context.Context, apiKey string) {
 		model.WithTemperature(0.3), // Low temperature for more deterministic output
 	)
 
-	f := formatter.NewOpenAIFormatter()
+	f := formatter.NewOpenAIChatFormatter()
 	ag := agent.NewReActAgent(
 		agent.WithReActName("assistant"),
 		agent.WithReActModel(m),
@@ -78,7 +78,7 @@ func example2(ctx context.Context, apiKey string) {
 		model.WithFrequencyPenalty(0.1),
 	)
 
-	f := formatter.NewOpenAIFormatter()
+	f := formatter.NewOpenAIChatFormatter()
 	ag := agent.NewReActAgent(
 		agent.WithReActName("assistant"),
 		agent.WithReActModel(m),
@@ -107,7 +107,7 @@ func example3(ctx context.Context, apiKey string) {
 		model.WithTemperature(0.0), // Zero temperature for JSON mode
 	)
 
-	f := formatter.NewOpenAIFormatter()
+	f := formatter.NewOpenAIChatFormatter()
 	ag := agent.NewReActAgent(
 		agent.WithReActName("assistant"),
 		agent.WithReActModel(m),
@@ -135,7 +135,7 @@ func example4(ctx context.Context, apiKey string) {
 		model.WithTemperature(0.5), // default temperature
 	)
 
-	f := formatter.NewOpenAIFormatter()
+	f := formatter.NewOpenAIChatFormatter()
 	ag := agent.NewReActAgent(
 		agent.WithReActName("assistant"),
 		agent.WithReActModel(m),

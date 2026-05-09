@@ -29,7 +29,7 @@ func NewInMemoryMemory() *InMemoryMemory {
 
 // Add adds message(s) into the memory storage.
 func (m *InMemoryMemory) Add(_ context.Context, msgs ...*message.Msg) error {
-	return m.AddWithMarks(nil, msgs, nil)
+	return m.AddWithMarks(context.TODO(), msgs, nil)
 }
 
 // AddWithMarks adds message(s) into the memory storage with specified marks.

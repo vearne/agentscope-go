@@ -101,7 +101,7 @@ func (c *StudioClient) postWithRetry(ctx context.Context, path string, body []by
 			log.Printf("studio: %s attempt %d failed: %v", path, attempt+1, err)
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return nil

@@ -18,10 +18,12 @@ func main() {
 	f := formatter.NewOpenAIChatFormatter()
 
 	mem := memory.NewInMemoryMemory()
-	mem.Add(context.Background(),
+	if err := mem.Add(context.Background(),
 		message.NewMsg("system", "You are a helpful assistant.", "system"),
 		message.NewMsg("user", "Write a short poem about programming in Go.", "user"),
-	)
+	); err != nil {
+		log.Fatal(err)
+	}
 
 	formatted, err := f.Format(mem.GetMessages())
 	if err != nil {

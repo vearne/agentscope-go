@@ -24,7 +24,7 @@ func main() {
 		log.Printf("Warning: studio init failed (studio may not be running): %v", err)
 		log.Println("Continuing without studio integration...")
 	}
-	defer studio.Shutdown(ctx)
+	defer func() { _ = studio.Shutdown(ctx) }()
 
 	m := model.NewOpenAIChatModel("gpt-4o", os.Getenv("OPENAI_API_KEY"), "", false)
 	f := formatter.NewOpenAIChatFormatter()

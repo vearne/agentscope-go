@@ -60,7 +60,9 @@ func main() {
 	}
 
 	fmt.Println("\n=== Remove 'Code Review' ===")
-	tk.RemoveAgentSkill("Code Review")
+	if err := tk.RemoveAgentSkill("Code Review"); err != nil {
+		log.Fatalf("remove skill: %v", err)
+	}
 	if tk.GetAgentSkillPrompt() == "" {
 		fmt.Println("  (prompt is empty after removing all skills)")
 	}

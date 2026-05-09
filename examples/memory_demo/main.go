@@ -20,8 +20,12 @@ func main() {
 	msg2 := message.NewMsg("assistant", "I can help you with that", "assistant")
 	msg3 := message.NewMsg("user", "I'm a software engineer", "user")
 
-	inMem.AddWithMarks(ctx, []*message.Msg{msg1, msg3}, []string{"job-search"})
-	inMem.AddWithMarks(ctx, []*message.Msg{msg2}, []string{"assistant-response"})
+	if err := inMem.AddWithMarks(ctx, []*message.Msg{msg1, msg3}, []string{"job-search"}); err != nil {
+		log.Fatal(err)
+	}
+	if err := inMem.AddWithMarks(ctx, []*message.Msg{msg2}, []string{"assistant-response"}); err != nil {
+		log.Fatal(err)
+	}
 
 	allMsgs := inMem.GetMessages()
 	fmt.Printf("Total messages: %d\n", len(allMsgs))
@@ -29,7 +33,9 @@ func main() {
 	jobMsgs, _ := inMem.GetMemory(ctx, "job-search", "", false)
 	fmt.Printf("Job search messages: %d\n", len(jobMsgs))
 
-	inMem.UpdateMessagesMark(ctx, "important", "job-search", nil)
+	if _, err := inMem.UpdateMessagesMark(ctx, "important", "job-search", nil); err != nil {
+		log.Fatal(err)
+	}
 
 	importantMsgs, _ := inMem.GetMemory(ctx, "important", "", false)
 	fmt.Printf("Important messages: %d\n", len(importantMsgs))
@@ -75,8 +81,12 @@ func main() {
 	questionMsg := message.NewMsg("user", "How do I implement caching?", "user")
 	answerMsg := message.NewMsg("assistant", "You can use Redis for caching", "assistant")
 
-	mem.AddWithMarks(ctx, []*message.Msg{welcomeMsg}, []string{"greeting"})
-	mem.AddWithMarks(ctx, []*message.Msg{questionMsg, answerMsg}, []string{"technical", "caching"})
+	if err := mem.AddWithMarks(ctx, []*message.Msg{welcomeMsg}, []string{"greeting"}); err != nil {
+		log.Fatal(err)
+	}
+	if err := mem.AddWithMarks(ctx, []*message.Msg{questionMsg, answerMsg}, []string{"technical", "caching"}); err != nil {
+		log.Fatal(err)
+	}
 
 	technicalMsgs, _ := mem.GetMemory(ctx, "technical", "", false)
 	fmt.Printf("Technical messages: %d\n", len(technicalMsgs))
@@ -84,7 +94,9 @@ func main() {
 	nonGreetingMsgs, _ := mem.GetMemory(ctx, "", "greeting", false)
 	fmt.Printf("Non-greeting messages: %d\n", len(nonGreetingMsgs))
 
-	mem.UpdateCompressedSummary(ctx, "User is asking about caching implementation")
+	if err := mem.UpdateCompressedSummary(ctx, "User is asking about caching implementation"); err != nil {
+		log.Fatal(err)
+	}
 
 	msgsWithSummary, _ := mem.GetMemory(ctx, "", "", true)
 	fmt.Printf("Messages with summary: %d (first is summary)\n", len(msgsWithSummary))

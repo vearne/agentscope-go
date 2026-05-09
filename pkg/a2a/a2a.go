@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -66,8 +67,7 @@ func (s *A2AServer) Start(addr string) error {
 
 	go func() {
 		if err := s.srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			// Server exited unexpectedly; nothing to do here since
-			// Stop will report the error if it hasn't been called.
+			log.Printf("[A2A] server exited: %v", err)
 		}
 	}()
 
@@ -96,7 +96,7 @@ func (s *A2AServer) handleCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.card)
+	_ = json.NewEncoder(w).Encode(s.card)
 }
 
 func (s *A2AServer) handleReply(w http.ResponseWriter, r *http.Request) {
@@ -110,11 +110,11 @@ func (s *A2AServer) handleReply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("read body: %v", err), http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	var msg message.Msg
-	if err := json.Unmarshal(body, &msg); err != nil {
-		http.Error(w, fmt.Sprintf("unmarshal: %v", err), http.StatusBadRequest)
+	if unmarshalErr := json.Unmarshal(body, &msg); unmarshalErr != nil {
+		http.Error(w, fmt.Sprintf("unmarshal: %v", unmarshalErr), http.StatusBadRequest)
 		return
 	}
 
@@ -125,7 +125,7 @@ func (s *A2AServer) handleReply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *A2AServer) handleObserve(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +139,7 @@ func (s *A2AServer) handleObserve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("read body: %v", err), http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	var msg message.Msg
 	if err := json.Unmarshal(body, &msg); err != nil {
@@ -198,7 +198,7 @@ func (c *A2AClient) GetCard(ctx context.Context) (*AgentCard, error) {
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -229,7 +229,7 @@ func (c *A2AClient) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, 
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)

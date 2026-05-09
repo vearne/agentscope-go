@@ -96,8 +96,12 @@ func (a *DeepAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg, 
 		sysMsg := message.NewMsg("system", a.sysPrompt, "system")
 		existing := a.mem.GetMessages()
 		restored := append([]*message.Msg{sysMsg}, existing...)
-		a.mem.Clear(ctx)
-		a.mem.Add(ctx, restored...)
+		if err := a.mem.Clear(ctx); err != nil {
+			return nil, fmt.Errorf("clear memory: %w", err)
+		}
+		if err := a.mem.Add(ctx, restored...); err != nil {
+			return nil, fmt.Errorf("add messages to memory: %w", err)
+		}
 	}
 
 	a.interrupted.Store(false)
@@ -231,12 +235,15 @@ func (a *DeepAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("model call: %w", err)
 	}
-	usageAttrs := spanIOAttrs(formatted, chatResp.Content)
-	if chatResp != nil && chatResp.Usage != nil {
-		usageAttrs = append(usageAttrs,
-			attribute.Int("gen_ai.usage.input_tokens", chatResp.Usage.InputTokens),
-			attribute.Int("gen_ai.usage.output_tokens", chatResp.Usage.OutputTokens),
-		)
+	var usageAttrs []attribute.KeyValue
+	if chatResp != nil {
+		usageAttrs = spanIOAttrs(formatted, chatResp.Content)
+		if chatResp.Usage != nil {
+			usageAttrs = append(usageAttrs,
+				attribute.Int("gen_ai.usage.input_tokens", chatResp.Usage.InputTokens),
+				attribute.Int("gen_ai.usage.output_tokens", chatResp.Usage.OutputTokens),
+			)
+		}
 	}
 	span.SetAttributes(usageAttrs...)
 
@@ -340,8 +347,13 @@ func (a *DeepAgent) maybeCompressContext(ctx context.Context) {
 			log.Printf("[DeepAgent] compression error: %v, continuing with original context", err)
 			return
 		}
-		a.mem.Clear(ctx)
-		a.mem.Add(ctx, compressed...)
+		if err := a.mem.Clear(ctx); err != nil {
+			log.Printf("[DeepAgent] clear memory error: %v", err)
+			return
+		}
+		if err := a.mem.Add(ctx, compressed...); err != nil {
+			log.Printf("[DeepAgent] add compressed messages error: %v", err)
+		}
 	}
 }
 
@@ -368,54 +380,58 @@ func (a *DeepAgent) buildInternalToolkit() {
 		schemas := a.toolkit.GetSchemas()
 		for _, s := range schemas {
 			toolName := s.Function.Name
-			a.internalToolkit.Register(s.Function.Name, s.Function.Description, s.Function.Parameters,
+			if err := a.internalToolkit.Register(s.Function.Name, s.Function.Description, s.Function.Parameters,
 				func(ctx context.Context, args map[string]interface{}) (*tool.ToolResponse, error) {
 					return a.toolkit.Execute(ctx, toolName, args)
 				},
-			)
+			); err != nil {
+				log.Printf("[DeepAgent] register tool %q: %v", s.Function.Name, err)
+			}
 		}
 	}
 
 	if a.subFactory != nil {
-		a.internalToolkit.Register("delegate_task",
-			"Delegate a task to a subagent. The subagent runs independently with its own context. Use this for complex multi-step work that would clutter your context.",
-			map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"task_description": map[string]interface{}{
-						"type":        "string",
-						"description": "Clear description of what the subagent should accomplish",
-					},
-					"subagent_name": map[string]interface{}{
-						"type":        "string",
-						"description": "Name for the subagent",
-					},
-					"system_prompt": map[string]interface{}{
-						"type":        "string",
-						"description": "Optional system prompt for the subagent",
-					},
+	if err := a.internalToolkit.Register("delegate_task",
+		"Delegate a task to a subagent. The subagent runs independently with its own context. Use this for complex multi-step work that would clutter your context.",
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"task_description": map[string]interface{}{
+					"type":        "string",
+					"description": "Clear description of what the subagent should accomplish",
 				},
-				"required": []string{"task_description", "subagent_name"},
+				"subagent_name": map[string]interface{}{
+					"type":        "string",
+					"description": "Name for the subagent",
+				},
+				"system_prompt": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional system prompt for the subagent",
+				},
 			},
-			func(ctx context.Context, args map[string]interface{}) (*tool.ToolResponse, error) {
-				desc, _ := args["task_description"].(string)
-				name, _ := args["subagent_name"].(string)
-				sysPrompt, _ := args["system_prompt"].(string)
+			"required": []string{"task_description", "subagent_name"},
+		},
+		func(ctx context.Context, args map[string]interface{}) (*tool.ToolResponse, error) {
+			desc, _ := args["task_description"].(string)
+			name, _ := args["subagent_name"].(string)
+			sysPrompt, _ := args["system_prompt"].(string)
 
-				if desc == "" || name == "" {
-					return tool.NewErrorResponse("task_description and subagent_name are required"), nil
-				}
+			if desc == "" || name == "" {
+				return tool.NewErrorResponse("task_description and subagent_name are required"), nil
+			}
 
-				result, err := a.subFactory.DelegateTask(ctx, DelegateTaskArgs{
-					TaskDescription: desc,
-					SubagentName:    name,
-					SystemPrompt:    sysPrompt,
-				})
-				if err != nil {
-					return tool.NewErrorResponse(fmt.Sprintf("subagent failed: %v", err)), nil
-				}
-				return tool.NewToolResponse(result), nil
-			},
-		)
+			result, err := a.subFactory.DelegateTask(ctx, DelegateTaskArgs{
+				TaskDescription: desc,
+				SubagentName:    name,
+				SystemPrompt:    sysPrompt,
+			})
+			if err != nil {
+				return tool.NewErrorResponse(fmt.Sprintf("subagent failed: %v", err)), nil
+			}
+			return tool.NewToolResponse(result), nil
+		},
+	); err != nil {
+		log.Printf("[DeepAgent] register tool %q: %v", "delegate_task", err)
+	}
 	}
 }

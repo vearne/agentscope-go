@@ -269,8 +269,8 @@ func insertTextFile(_ context.Context, args map[string]interface{}) (*ToolRespon
 		}, nil
 	}
 
-	if err := os.WriteFile(filePath, []byte(strings.Join(originalLines, "")), 0o644); err != nil {
-		return &ToolResponse{Content: fmt.Sprintf("Error: %v", err), IsError: true}, nil
+	if writeErr := os.WriteFile(filePath, []byte(strings.Join(originalLines, "")), 0o644); writeErr != nil {
+		return &ToolResponse{Content: fmt.Sprintf("Error: %v", writeErr), IsError: true}, nil
 	}
 
 	newLines, err := readFileLines(filePath)

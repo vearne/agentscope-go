@@ -36,7 +36,9 @@ func (a *UserAgent) Reply(ctx context.Context, _ *message.Msg) (*message.Msg, er
 	}
 
 	msg := message.NewMsg(a.name, input, "user")
-	a.mem.Add(ctx, msg)
+	if err := a.mem.Add(ctx, msg); err != nil {
+		return nil, fmt.Errorf("add message to memory: %w", err)
+	}
 	return msg, nil
 }
 

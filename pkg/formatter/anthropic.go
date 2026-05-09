@@ -77,13 +77,14 @@ func (f *AnthropicChatFormatter) Format(msgs []*message.Msg) ([]model.FormattedM
 				imgContent := map[string]interface{}{
 					"type": "image",
 				}
-				if srcType == "base64" {
+				switch srcType {
+				case "base64":
 					imgContent["source"] = map[string]interface{}{
 						"type":       "base64",
 						"media_type": message.GetSourceMediaType(src),
 						"data":       message.GetSourceData(src),
 					}
-				} else if srcType == "url" {
+				case "url":
 					imgContent["source"] = map[string]interface{}{
 						"type": "url",
 						"url":  message.GetSourceURL(src),

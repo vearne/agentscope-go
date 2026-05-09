@@ -118,7 +118,7 @@ func (t *Toolkit) GetAgentSkillPromptWithTemplate(instruction, skillTemplate str
 	sb.WriteString("\n\n")
 
 	for _, skill := range t.skills {
-		sb.WriteString(fmt.Sprintf(skillTemplate, skill.Name, skill.Description, skill.Dir))
+		fmt.Fprintf(&sb, skillTemplate, skill.Name, skill.Description, skill.Dir)
 		sb.WriteString("\n\n")
 	}
 

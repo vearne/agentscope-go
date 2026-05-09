@@ -39,7 +39,7 @@ func freePort(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("get free port: %v", err)
 	}
-	ln.Close()
+	_ = ln.Close()
 	return ln.Addr().String()
 }
 
@@ -58,7 +58,7 @@ func TestA2AServer_Reply(t *testing.T) {
 		t.Fatalf("start server: %v", err)
 	}
 	<-srv.Ready()
-	defer srv.Stop(context.Background())
+	defer func() { _ = srv.Stop(context.Background()) }()
 
 	client := NewA2AClient("http://" + addr)
 
@@ -90,7 +90,7 @@ func TestA2AServer_GetCard(t *testing.T) {
 		t.Fatalf("start server: %v", err)
 	}
 	<-srv.Ready()
-	defer srv.Stop(context.Background())
+	defer func() { _ = srv.Stop(context.Background()) }()
 
 	client := NewA2AClient("http://" + addr)
 	gotCard, err := client.GetCard(context.Background())
@@ -119,7 +119,7 @@ func TestA2AServer_Observe(t *testing.T) {
 		t.Fatalf("start server: %v", err)
 	}
 	<-srv.Ready()
-	defer srv.Stop(context.Background())
+	defer func() { _ = srv.Stop(context.Background()) }()
 
 	client := NewA2AClient("http://" + addr)
 	msg := message.NewMsg("user", "observe this", "user")
@@ -143,7 +143,7 @@ func TestA2AClient_Discover(t *testing.T) {
 		t.Fatalf("start server: %v", err)
 	}
 	<-srv.Ready()
-	defer srv.Stop(context.Background())
+	defer func() { _ = srv.Stop(context.Background()) }()
 
 	client := NewA2AClient("http://" + addr)
 	if client.Name() != "remote-agent" {

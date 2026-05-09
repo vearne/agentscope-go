@@ -20,7 +20,7 @@ func TestClient_RegisterRun(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &receivedBody)
+		_ = json.Unmarshal(body, &receivedBody)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -56,7 +56,7 @@ func TestClient_PushMessage(t *testing.T) {
 			t.Errorf("expected path /trpc/pushMessage, got %s", r.URL.Path)
 		}
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &receivedBody)
+		_ = json.Unmarshal(body, &receivedBody)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -140,7 +140,7 @@ func TestClient_PID(t *testing.T) {
 	var receivedBody map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &receivedBody)
+		_ = json.Unmarshal(body, &receivedBody)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -153,7 +153,7 @@ func TestClient_PID(t *testing.T) {
 		httpClient: server.Client(),
 	}
 
-	client.RegisterRun(context.Background())
+	_ = client.RegisterRun(context.Background())
 
 	pid, ok := receivedBody["pid"].(float64)
 	if !ok {

@@ -82,14 +82,15 @@ func geminiPartsFromMsg(msg *message.Msg) interface{} {
 				continue
 			}
 			srcType := message.GetSourceType(src)
-			if srcType == "base64" {
+			switch srcType {
+			case "base64":
 				parts = append(parts, map[string]interface{}{
 					"inlineData": map[string]interface{}{
 						"mimeType": message.GetSourceMediaType(src),
 						"data":     message.GetSourceData(src),
 					},
 				})
-			} else if srcType == "url" {
+			case "url":
 				parts = append(parts, map[string]interface{}{
 					"fileData": map[string]interface{}{
 						"fileUri": message.GetSourceURL(src),

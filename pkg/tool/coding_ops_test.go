@@ -18,7 +18,9 @@ func TestRegisterExecuteShellCommandTool(t *testing.T) {
 
 func TestExecuteShellCommand_Success(t *testing.T) {
 	tk := NewToolkit()
-	RegisterExecuteShellCommandTool(tk)
+	if err := RegisterExecuteShellCommandTool(tk); err != nil {
+		t.Fatalf("RegisterExecuteShellCommandTool failed: %v", err)
+	}
 
 	resp, err := tk.Execute(context.Background(), "execute_shell_command", map[string]interface{}{
 		"command": "echo hello world",
@@ -38,7 +40,9 @@ func TestExecuteShellCommand_Success(t *testing.T) {
 
 func TestExecuteShellCommand_NonZeroExit(t *testing.T) {
 	tk := NewToolkit()
-	RegisterExecuteShellCommandTool(tk)
+	if err := RegisterExecuteShellCommandTool(tk); err != nil {
+		t.Fatalf("RegisterExecuteShellCommandTool failed: %v", err)
+	}
 
 	resp, err := tk.Execute(context.Background(), "execute_shell_command", map[string]interface{}{
 		"command": "exit 42",
@@ -55,7 +59,9 @@ func TestExecuteShellCommand_NonZeroExit(t *testing.T) {
 
 func TestExecuteShellCommand_Stderr(t *testing.T) {
 	tk := NewToolkit()
-	RegisterExecuteShellCommandTool(tk)
+	if err := RegisterExecuteShellCommandTool(tk); err != nil {
+		t.Fatalf("RegisterExecuteShellCommandTool failed: %v", err)
+	}
 
 	resp, err := tk.Execute(context.Background(), "execute_shell_command", map[string]interface{}{
 		"command": "echo error_msg >&2",
@@ -72,7 +78,9 @@ func TestExecuteShellCommand_Stderr(t *testing.T) {
 
 func TestExecuteShellCommand_Timeout(t *testing.T) {
 	tk := NewToolkit()
-	RegisterExecuteShellCommandTool(tk)
+	if err := RegisterExecuteShellCommandTool(tk); err != nil {
+		t.Fatalf("RegisterExecuteShellCommandTool failed: %v", err)
+	}
 
 	resp, err := tk.Execute(context.Background(), "execute_shell_command", map[string]interface{}{
 		"command": "sleep 10",
@@ -103,7 +111,9 @@ func TestRegisterExecutePythonCodeTool(t *testing.T) {
 
 func TestExecutePythonCode_Print(t *testing.T) {
 	tk := NewToolkit()
-	RegisterExecutePythonCodeTool(tk)
+	if err := RegisterExecutePythonCodeTool(tk); err != nil {
+		t.Fatalf("RegisterExecutePythonCodeTool failed: %v", err)
+	}
 
 	resp, err := tk.Execute(context.Background(), "execute_python_code", map[string]interface{}{
 		"code": "print('hello from python')",
@@ -123,7 +133,9 @@ func TestExecutePythonCode_Print(t *testing.T) {
 
 func TestExecutePythonCode_SyntaxError(t *testing.T) {
 	tk := NewToolkit()
-	RegisterExecutePythonCodeTool(tk)
+	if err := RegisterExecutePythonCodeTool(tk); err != nil {
+		t.Fatalf("RegisterExecutePythonCodeTool failed: %v", err)
+	}
 
 	resp, err := tk.Execute(context.Background(), "execute_python_code", map[string]interface{}{
 		"code": "print(",
@@ -143,7 +155,9 @@ func TestExecutePythonCode_SyntaxError(t *testing.T) {
 
 func TestExecutePythonCode_Computation(t *testing.T) {
 	tk := NewToolkit()
-	RegisterExecutePythonCodeTool(tk)
+	if err := RegisterExecutePythonCodeTool(tk); err != nil {
+		t.Fatalf("RegisterExecutePythonCodeTool failed: %v", err)
+	}
 
 	resp, err := tk.Execute(context.Background(), "execute_python_code", map[string]interface{}{
 		"code": "x = 2 + 3\nprint(x)",

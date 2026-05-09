@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 	"strings"
 
@@ -42,9 +43,11 @@ func WerewolvesGame(ctx context.Context, agents []*agent.ReActAgent) error {
 
 	for i, a := range shuffledAgents {
 		role := roles[i]
-		a.Observe(ctx, moderatorMsg(
+		if err := a.Observe(ctx, moderatorMsg(
 			fmt.Sprintf("[%s ONLY] %s, your role is %s.", a.Name(), a.Name(), role),
-		))
+		)); err != nil {
+			log.Printf("observe error for %s: %v", a.Name(), err)
+		}
 		players.AddPlayer(a, role)
 	}
 	players.PrintRoles()
@@ -67,7 +70,9 @@ func WerewolvesGame(ctx context.Context, agents []*agent.ReActAgent) error {
 				namesToStr(players.CurrentAlive),
 			))
 			for _, w := range players.Werewolves {
-				w.Observe(ctx, wolfDiscussMsg)
+				if err := w.Observe(ctx, wolfDiscussMsg); err != nil {
+					log.Printf("observe error for %s: %v", w.Name(), err)
+				}
 			}
 
 			nWolves := len(players.Werewolves)
@@ -170,7 +175,9 @@ func WerewolvesGame(ctx context.Context, agents []*agent.ReActAgent) error {
 					resultMsg := moderatorMsg(fmt.Sprintf(Prompts["seer_result"],
 						target, role,
 					))
-					seerAgent.Observe(ctx, resultMsg)
+					if err := seerAgent.Observe(ctx, resultMsg); err != nil {
+					log.Printf("observe error for %s: %v", seerAgent.Name(), err)
+				}
 					fmt.Printf("  Seer checked %s\n", target)
 				}
 			}
@@ -232,7 +239,7 @@ func WerewolvesGame(ctx context.Context, agents []*agent.ReActAgent) error {
 
 		// --- Day Discussion ---
 		fmt.Println("\n[Day Discussion]")
-		aliveNames := agentNames(players.CurrentAlive)
+		_ = agentNames(players.CurrentAlive)
 		discussMsg := moderatorMsg(fmt.Sprintf(Prompts["discuss"],
 			namesToStr(players.CurrentAlive), namesToStr(players.CurrentAlive),
 		))
@@ -258,7 +265,7 @@ func WerewolvesGame(ctx context.Context, agents []*agent.ReActAgent) error {
 
 		// --- Day Voting ---
 		fmt.Println("\n[Day Voting]")
-		aliveNames = agentNames(players.CurrentAlive)
+		aliveNames := agentNames(players.CurrentAlive)
 		voteMsg := moderatorMsg(fmt.Sprintf(Prompts["vote"], nameListToStr(aliveNames)))
 		voteResults, err := pipeline.FanoutPipeline(ctx, toAgentBases(players.CurrentAlive), voteMsg)
 		if err != nil {
@@ -325,7 +332,10 @@ func WerewolvesGame(ctx context.Context, agents []*agent.ReActAgent) error {
 
 	fmt.Println("\n[Game Over - Reflection]")
 	reflectMsg := moderatorMsg(Prompts["reflect"])
-	pipeline.FanoutPipeline(ctx, toAgentBases(players.AllPlayers), reflectMsg)
+	_, err := pipeline.FanoutPipeline(ctx, toAgentBases(players.AllPlayers), reflectMsg)
+	if err != nil {
+		log.Printf("fanout error: %v", err)
+	}
 
 	return nil
 }

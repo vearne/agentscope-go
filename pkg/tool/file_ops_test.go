@@ -27,7 +27,9 @@ func TestViewTextFile_FullContent(t *testing.T) {
 	}
 
 	tk := NewToolkit()
-	RegisterViewTextFileTool(tk)
+	if err := RegisterViewTextFileTool(tk); err != nil {
+		t.Fatal(err)
+	}
 
 	resp, err := tk.Execute(context.Background(), "view_text_file", map[string]interface{}{
 		"file_path": fpath,
@@ -57,7 +59,9 @@ func TestViewTextFile_WithRanges(t *testing.T) {
 	}
 
 	tk := NewToolkit()
-	RegisterViewTextFileTool(tk)
+	if err := RegisterViewTextFileTool(tk); err != nil {
+		t.Fatal(err)
+	}
 
 	resp, err := tk.Execute(context.Background(), "view_text_file", map[string]interface{}{
 		"file_path": fpath,

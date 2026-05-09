@@ -39,7 +39,7 @@ func main() {
 	if err := server.Start(":18080"); err != nil {
 		log.Fatal(err)
 	}
-	defer server.Stop(context.Background())
+	defer func() { _ = server.Stop(context.Background()) }()
 
 	<-server.Ready()
 	fmt.Println("A2A server started on :18080")
