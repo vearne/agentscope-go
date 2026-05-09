@@ -42,10 +42,6 @@ func stringifyGenAITracePayload(v any) string {
 	return truncateGenAIMessagesJSON(string(b))
 }
 
-func genAIMessagesAttr(key string, v any) attribute.KeyValue {
-	return attribute.String(key, stringifyGenAITracePayload(v))
-}
-
 // toGenAIMessages converts various input types to GenAI message format.
 // Supports []*message.Msg, []message.ContentBlock, and []model.FormattedMessage.
 func toGenAIMessages(input any) []message.GenAIMessage {
@@ -237,8 +233,16 @@ func (a *ReActAgent) Reply(ctx context.Context, msg *message.Msg) (*message.Msg,
 		sysMsg := message.NewMsg("system", a.sysPrompt, "system")
 		existing := a.mem.GetMessages()
 		restored := append([]*message.Msg{sysMsg}, existing...)
-		a.mem.Clear(ctx)
-		a.mem.Add(ctx, restored...)
+		if err := a.mem.Clear(ctx); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return nil, fmt.Errorf("clear memory: %w", err)
+		}
+		if err := a.mem.Add(ctx, restored...); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return nil, fmt.Errorf("add messages to memory: %w", err)
+		}
 	}
 
 	a.interrupted.Store(false)
@@ -364,12 +368,15 @@ func (a *ReActAgent) thinkAndAct(ctx context.Context) (*message.Msg, error) {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("model call: %w", err)
 	}
-	usageAttrs := spanIOAttrs(formatted, chatResp.Content)
-	if chatResp != nil && chatResp.Usage != nil {
-		usageAttrs = append(usageAttrs,
-			attribute.Int("gen_ai.usage.input_tokens", chatResp.Usage.InputTokens),
-			attribute.Int("gen_ai.usage.output_tokens", chatResp.Usage.OutputTokens),
-		)
+	var usageAttrs []attribute.KeyValue
+	if chatResp != nil {
+		usageAttrs = spanIOAttrs(formatted, chatResp.Content)
+		if chatResp.Usage != nil {
+			usageAttrs = append(usageAttrs,
+				attribute.Int("gen_ai.usage.input_tokens", chatResp.Usage.InputTokens),
+				attribute.Int("gen_ai.usage.output_tokens", chatResp.Usage.OutputTokens),
+			)
+		}
 	}
 	span.SetAttributes(usageAttrs...)
 

@@ -93,8 +93,12 @@ func TestToolkit_GetSchemas(t *testing.T) {
 		return &ToolResponse{Content: "ok"}, nil
 	}
 
-	tk.Register("tool_a", "Tool A", params, fn)
-	tk.Register("tool_b", "Tool B", params, fn)
+	if err := tk.Register("tool_a", "Tool A", params, fn); err != nil {
+		t.Fatalf("Register tool_a: %v", err)
+	}
+	if err := tk.Register("tool_b", "Tool B", params, fn); err != nil {
+		t.Fatalf("Register tool_b: %v", err)
+	}
 
 	schemas := tk.GetSchemas()
 	if len(schemas) != 2 {
@@ -119,8 +123,12 @@ func TestToolkit_GetToolNames(t *testing.T) {
 		return &ToolResponse{Content: "ok"}, nil
 	}
 
-	tk.Register("alpha", "Alpha", nil, fn)
-	tk.Register("beta", "Beta", nil, fn)
+	if err := tk.Register("alpha", "Alpha", nil, fn); err != nil {
+		t.Fatalf("Register alpha: %v", err)
+	}
+	if err := tk.Register("beta", "Beta", nil, fn); err != nil {
+		t.Fatalf("Register beta: %v", err)
+	}
 
 	names := tk.GetToolNames()
 	if len(names) != 2 {
@@ -204,7 +212,9 @@ func TestToolkit_RegisterFuncToolError(t *testing.T) {
 	}
 
 	tk := NewToolkit()
-	tk.RegisterFunc(fn, RegisterOption{Name: "fail_tool", Description: "always fails"})
+	if err := tk.RegisterFunc(fn, RegisterOption{Name: "fail_tool", Description: "always fails"}); err != nil {
+		t.Fatalf("RegisterFunc: %v", err)
+	}
 
 	_, err := tk.Execute(context.Background(), "fail_tool", map[string]interface{}{
 		"input": "test",
@@ -273,7 +283,9 @@ func TestToolkit_Concurrent(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			name := fmt.Sprintf("tool_%d", n)
-			tk.Register(name, "desc", nil, fn)
+			if err := tk.Register(name, "desc", nil, fn); err != nil {
+				panic(fmt.Sprintf("Register %s: %v", name, err))
+			}
 		}(i)
 	}
 	wg.Wait()

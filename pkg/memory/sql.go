@@ -72,7 +72,7 @@ func (sm *SQLMemory) initTables(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS users (
@@ -199,7 +199,7 @@ func (sm *SQLMemory) AddWithMarks(ctx context.Context, msgs []*message.Msg, mark
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	maxIndex, err := sm.getNextIndexTx(ctx, tx)
 	if err != nil {
@@ -277,7 +277,7 @@ func (sm *SQLMemory) GetMemory(ctx context.Context, mark string, excludeMark str
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var messages []*message.Msg
 	for rows.Next() {
@@ -325,7 +325,7 @@ func (sm *SQLMemory) Clear(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.ExecContext(ctx, `
 		DELETE FROM message_marks
@@ -366,7 +366,7 @@ func (sm *SQLMemory) Delete(ctx context.Context, msgIDs []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	placeholders := make([]string, len(msgIDs))
 	args := make([]interface{}, len(msgIDs))
@@ -411,7 +411,7 @@ func (sm *SQLMemory) DeleteByMark(ctx context.Context, marks []string) (int, err
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	placeholders := make([]string, len(marks))
 	args := make([]interface{}, len(marks))
@@ -429,19 +429,19 @@ func (sm *SQLMemory) DeleteByMark(ctx context.Context, marks []string) (int, err
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var msgIDs []string
 	for rows.Next() {
 		var msgID string
-		if err := rows.Scan(&msgID); err != nil {
-			return 0, err
+		if scanErr := rows.Scan(&msgID); scanErr != nil {
+			return 0, scanErr
 		}
 		msgIDs = append(msgIDs, msgID)
 	}
 
-	if err := rows.Err(); err != nil {
-		return 0, err
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return 0, rowsErr
 	}
 
 	if len(msgIDs) == 0 {
@@ -540,7 +540,7 @@ func (sm *SQLMemory) UpdateMessagesMark(ctx context.Context, newMark string, old
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	query := `
 		SELECT id FROM messages
@@ -571,7 +571,7 @@ func (sm *SQLMemory) UpdateMessagesMark(ctx context.Context, newMark string, old
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var targetMsgIDs []string
 	for rows.Next() {

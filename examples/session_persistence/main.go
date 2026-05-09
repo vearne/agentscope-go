@@ -68,5 +68,5 @@ func main() {
 	}
 	fmt.Printf("\n[%s] %s\n", resp2.Name, resp2.GetTextContent())
 
-	os.Remove(sessionFile)
+	_ = os.Remove(sessionFile)
 }

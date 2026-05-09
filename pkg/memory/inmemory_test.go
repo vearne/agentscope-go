@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -69,7 +70,9 @@ func TestInMemoryMemory_Clear(t *testing.T) {
 	m := NewInMemoryMemory()
 	ctx := context.Background()
 
-	m.Add(ctx, message.NewMsg("user", "hello", "user"))
+	if err := m.Add(ctx, message.NewMsg("user", "hello", "user")); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
 	if m.Size() != 1 {
 		t.Fatalf("expected size 1, got %d", m.Size())
 	}
@@ -91,8 +94,12 @@ func TestInMemoryMemory_ToStrList(t *testing.T) {
 	m := NewInMemoryMemory()
 	ctx := context.Background()
 
-	m.Add(ctx, message.NewMsg("user", "hello world", "user"))
-	m.Add(ctx, message.NewMsg("assistant", "hi there", "assistant"))
+	if err := m.Add(ctx, message.NewMsg("user", "hello world", "user")); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if err := m.Add(ctx, message.NewMsg("assistant", "hi there", "assistant")); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
 
 	strs := m.ToStrList()
 	if len(strs) != 2 {
@@ -110,7 +117,9 @@ func TestInMemoryMemory_GetMessagesReturnsCopy(t *testing.T) {
 	m := NewInMemoryMemory()
 	ctx := context.Background()
 
-	m.Add(ctx, message.NewMsg("user", "hello", "user"))
+	if err := m.Add(ctx, message.NewMsg("user", "hello", "user")); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
 	msgs := m.GetMessages()
 
 	msgs[0] = nil
@@ -144,7 +153,10 @@ func TestInMemoryMemory_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			m.Add(ctx, message.NewMsg("user", "msg", "user"))
+			_ = n
+			if err := m.Add(ctx, message.NewMsg("user", "msg", "user")); err != nil {
+				panic(fmt.Sprintf("Add failed: %v", err))
+			}
 		}(i)
 	}
 	wg.Wait()

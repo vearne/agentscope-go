@@ -18,7 +18,7 @@ func TestForwardMessage_PushesResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&pushCount, 1)
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &lastBody)
+		_ = json.Unmarshal(body, &lastBody)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -48,7 +48,7 @@ func TestForwardMessage_PushesUserInput(t *testing.T) {
 	var lastBody map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &lastBody)
+		_ = json.Unmarshal(body, &lastBody)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

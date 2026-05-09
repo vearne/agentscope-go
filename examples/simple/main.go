@@ -25,7 +25,7 @@ func main() {
 		log.Printf("Warning: studio init failed (studio may not be running): %v", err)
 		log.Println("Continuing without studio integration...")
 	}
-	defer studio.Shutdown(ctx)
+	defer func() { _ = studio.Shutdown(ctx) }()
 
 	tk := tool.NewToolkit()
 

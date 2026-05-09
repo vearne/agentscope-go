@@ -123,11 +123,11 @@ func executePythonCode(ctx context.Context, args map[string]interface{}) (*ToolR
 	if err != nil {
 		return &ToolResponse{Content: fmt.Sprintf("Error creating temp dir: %v", err), IsError: true}, nil
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("tmp_%s.py", uuid.New().String()[:8]))
-	if err := os.WriteFile(tmpFile, []byte(code), 0o644); err != nil {
-		return &ToolResponse{Content: fmt.Sprintf("Error writing temp file: %v", err), IsError: true}, nil
+	if writeErr := os.WriteFile(tmpFile, []byte(code), 0o644); writeErr != nil {
+		return &ToolResponse{Content: fmt.Sprintf("Error writing temp file: %v", writeErr), IsError: true}, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
