@@ -22,16 +22,30 @@ import (
 	"github.com/vearne/agentscope-go/pkg/memory"
 	"github.com/vearne/agentscope-go/pkg/message"
 	"github.com/vearne/agentscope-go/pkg/model"
+	"github.com/vearne/agentscope-go/pkg/studio"
 	"github.com/vearne/agentscope-go/pkg/tool"
 )
 
 func main() {
+	ctx := context.Background()
+
+	if err := studio.Init(
+		studio.WithURL("http://localhost:3000"),
+		studio.WithProject("interrupt-studio"),
+	); err != nil {
+		log.Printf("Warning: studio init failed (studio may not be running): %v", err)
+		log.Println("Continuing without studio integration...")
+	}
+	defer func() { _ = studio.Shutdown(ctx) }()
+
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		log.Fatal("Please set OPENAI_API_KEY environment variable")
 	}
 
-	m := model.NewOpenAIChatModel("gpt-4o", apiKey, "", false)
+	baseURL := os.Getenv("OPENAI_BASE_URL")
+	modelName := os.Getenv("OPENAI_MODEL")
+	m := model.NewOpenAIChatModel(modelName, apiKey, baseURL, false)
 	f := formatter.NewOpenAIChatFormatter()
 
 	tk := tool.NewToolkit()
